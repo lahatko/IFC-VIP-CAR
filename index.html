@@ -46,7 +46,7 @@ h1{font-size:18px;margin:0}
 .guide{position:absolute;left:10%;width:80%;top:50%;aspect-ratio:4.4/1;transform:translateY(-50%);border:3px solid rgba(255,255,255,.95);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.38)}
 .guide.hit{border-color:#4fd18b}
 .camstat{position:absolute;left:0;right:0;bottom:0;padding:10px 12px;color:#fff;font-size:14px;font-weight:500;background:linear-gradient(transparent,rgba(0,0,0,.7));display:flex;justify-content:space-between;gap:8px;align-items:flex-end}
-.camstat b{font-size:20px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.camstat b{font-size:20px;cursor:pointer;padding:2px 8px;border-radius:6px;background:rgba(255,255,255,.18);letter-spacing:.08em;font-variant-numeric:tabular-nums}
 .camover{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#fff;text-align:center;padding:16px}
 .camover p{margin:0;font-size:14px}
 .camctl{position:absolute;top:8px;right:8px;display:flex;gap:6px}
@@ -337,6 +337,16 @@ function parseRead(text){
   return {t4, lead: all.slice(0, Math.max(0, all.length - 4))};
 }
 
+function showRead(t4, lead){
+  lastShown = t4; $('q').value = t4;
+  const st = render(t4, lead);
+  $('guide').classList.add('hit'); setTimeout(() => $('guide').classList.remove('hit'), 600);
+  try { if (navigator.vibrate) navigator.vibrate(st === 'ok' ? 60 : [80, 60, 80]); } catch(e) {}
+  $('camMsg').textContent = '조회됨 · 다른 차량을 비추면 다시 조회합니다';
+}
+// 오른쪽 아래 숫자를 누르면 바로 조회
+$('camRead').addEventListener('click', () => { const t = $('camRead').textContent; if (/^\d{4}$/.test(t)) showRead(t, ''); });
+
 async function loop(){
   if (!scanning || busy) return;
   busy = true;
@@ -345,19 +355,15 @@ async function loop(){
     if (c) {
       const { data } = await worker.recognize(c);
       const r = parseRead(data.text || '');
-      reads.push(r ? r.t4 : null); if (reads.length > 4) reads.shift();
-      if (r) $('camRead').textContent = r.t4;
-      const cnt = r ? reads.filter(x => x === r.t4).length : 0;
-      if (r && cnt >= 2 && r.t4 !== lastShown) {
-        lastShown = r.t4;
-        $('q').value = r.t4;
-        const st = render(r.t4, r.lead);
-        $('guide').classList.add('hit'); setTimeout(() => $('guide').classList.remove('hit'), 600);
-        if (navigator.vibrate) navigator.vibrate(st === 'ok' ? 60 : [80, 60, 80]);
-        $('camMsg').textContent = '조회됨 · 다른 차량을 비추면 다시 조회합니다';
+      reads.push(r ? r.t4 : null); if (reads.length > 6) reads.shift();
+      if (r) {
+        $('camRead').textContent = r.t4;
+        const known = PLATES.some(x => x.t4 === r.t4);           // 명단에 있는 번호면 한 번만 읽혀도 조회
+        const cnt = reads.filter(x => x === r.t4).length;          // 명단에 없으면 두 번 읽혀야 '미등록' 표시
+        if (r.t4 !== lastShown && (known || cnt >= 2)) showRead(r.t4, r.lead);
       }
     }
-  } catch(e) { /* 한 프레임 실패는 무시 */ }
+  } catch(e) { console.warn(e); }
   busy = false;
   if (scanning) setTimeout(loop, 120);
 }
