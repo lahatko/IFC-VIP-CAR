@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="차량조회">
+<meta name="robots" content="noindex,nofollow">
+<title>IFC 차량조회</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#14202b; --muted:#5b6876; --line:#d5dbe2;
+  --accent:#1d5fd1; --accent-fg:#ffffff;
+  --ok:#0f7a43; --ok-bg:#e3f4ea; --bad:#b42318; --bad-bg:#fdecea; --warn:#9a5b00; --warn-bg:#fff3d6;
+  --none:#3d4753; --none-bg:#e6e9ed; --plate-bg:#ffffff; --plate-line:#14202b;
+  --f-ui:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0f151b; --panel:#18212a; --fg:#e8edf2; --muted:#93a0ad; --line:#2a3642;
+  --accent:#5b93f0; --accent-fg:#0b1220;
+  --ok:#4fd18b; --ok-bg:#12321f; --bad:#ff8a7a; --bad-bg:#3a1714; --warn:#f2bf55; --warn-bg:#352708;
+  --none:#c3ccd6; --none-bg:#232d37; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;line-height:1.5;
+  padding:env(safe-area-inset-top,0px) max(14px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px))}
+[hidden]{display:none!important}
+.wrap{max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+header{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding-top:10px;flex-wrap:wrap}
+h1{font-size:18px;margin:0}
+.meta{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.btn{font:700 15px var(--f-ui);border-radius:10px;padding:0 16px;cursor:pointer;background:var(--panel);color:var(--fg);border:2px solid var(--line);min-height:48px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.inp{flex:1;min-width:0;font:700 22px/1 var(--f-ui);letter-spacing:.04em;padding:13px 14px;border:2px solid var(--line);border-radius:10px;background:var(--panel);color:var(--fg)}
+.inp:focus{outline:none;border-color:var(--accent)}
+.row{display:flex;gap:8px}
+.hint{color:var(--muted);font-size:13px;margin:0}
+.err{color:var(--bad);font-size:14px;margin:0;font-weight:500}
+
+/* camera */
+.cam{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:4/3;max-height:52vh;width:100%}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide{position:absolute;left:10%;width:80%;top:50%;aspect-ratio:4.4/1;transform:translateY(-50%);border:3px solid rgba(255,255,255,.95);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.38)}
+.guide.hit{border-color:#4fd18b}
+.camstat{position:absolute;left:0;right:0;bottom:0;padding:10px 12px;color:#fff;font-size:14px;font-weight:500;background:linear-gradient(transparent,rgba(0,0,0,.7));display:flex;justify-content:space-between;gap:8px;align-items:flex-end}
+.camstat b{font-size:20px;letter-spacing:.08em;font-variant-numeric:tabular-nums}
+.camover{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#fff;text-align:center;padding:16px}
+.camover p{margin:0;font-size:14px}
+.camctl{position:absolute;top:8px;right:8px;display:flex;gap:6px}
+.pill{font:700 13px var(--f-ui);border:0;border-radius:999px;padding:7px 12px;background:rgba(0,0,0,.55);color:#fff;cursor:pointer}
+
+/* results */
+.verdict{border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:2px;border:2px solid transparent}
+.verdict .lbl{font-size:13px;font-weight:700;letter-spacing:.04em}
+.verdict .big{font-size:26px;font-weight:700;line-height:1.25}
+.verdict .sub{font-size:14px}
+.v-ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.v-bad{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.v-warn{background:var(--warn-bg);color:var(--warn);border-color:var(--warn)}
+.v-none{background:var(--none-bg);color:var(--none);border-color:var(--line)}
+.cards{display:flex;flex-direction:column;gap:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.plate{font:700 22px/1 var(--f-ui);letter-spacing:.06em;background:var(--plate-bg);color:#14202b;border:2px solid var(--plate-line);border-radius:6px;padding:7px 10px;white-space:nowrap}
+.plate mark{background:#ffe27a;color:inherit;border-radius:2px}
+.tag{font-size:12.5px;font-weight:700;padding:4px 9px;border-radius:999px;white-space:nowrap}
+.t-ok{background:var(--ok-bg);color:var(--ok)}.t-bad{background:var(--bad-bg);color:var(--bad)}.t-b{background:var(--none-bg);color:var(--fg)}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:14px}
+dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.ph{display:block;color:var(--accent);font-weight:500;text-decoration:none;font-variant-numeric:tabular-nums}
+span.ph{color:var(--muted)}
+.warn{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500}
+.section-h{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin:4px 0 -4px}
+.lock{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;margin-top:20px}
+.lock h2{margin:0;font-size:18px}
+footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px}
+.link{background:none;border:0;color:var(--muted);font:500 13px var(--f-ui);text-decoration:underline;cursor:pointer;padding:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>IFC 차량조회</h1>
+    <span class="meta" id="meta"></span>
+  </header>
+
+  <!-- 비밀번호 -->
+  <form class="lock" id="lock" hidden autocomplete="off">
+    <h2>비밀번호를 입력하세요</h2>
+    <p class="hint">관리자에게 받은 비밀번호입니다. 이 휴대폰에서는 한 번만 입력하면 됩니다.</p>
+    <input class="inp" id="pw" type="password" autocomplete="current-password" aria-label="비밀번호">
+    <p class="err" id="pwErr" hidden></p>
+    <button class="btn primary" type="submit" id="pwBtn">열기</button>
+  </form>
+  <p class="err" id="loadErr" hidden></p>
+
+  <!-- 본 화면 -->
+  <div id="main" hidden style="display:flex;flex-direction:column;gap:12px">
+    <div class="cam" id="cam">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="guide" id="guide" hidden></div>
+      <div class="camctl" id="camctl" hidden>
+        <button class="pill" type="button" id="pauseBtn">일시정지</button>
+      </div>
+      <div class="camstat" id="camstat" hidden><span id="camMsg">번호판을 네모 안에 맞춰주세요</span><b id="camRead"></b></div>
+      <div class="camover" id="camover">
+        <p id="camOverMsg">카메라를 켜면 번호판을 비추기만 해도 자동으로 조회합니다.</p>
+        <button class="btn primary" type="button" id="camStart">카메라 켜기</button>
+      </div>
+    </div>
+
+    <form class="row" id="f" autocomplete="off">
+      <input class="inp" id="q" placeholder="뒤 4자리 또는 회사명" aria-label="차량번호 또는 회사명" enterkeyhint="search">
+      <button class="btn" type="button" id="clr">지움</button>
+    </form>
+
+    <div id="out"></div>
+
+    <footer>
+      <span class="meta" id="counts"></span>
+      <button class="link" type="button" id="logout">비밀번호 다시 입력</button>
+    </footer>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const store = { get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }, del(k){ try { localStorage.removeItem(k); } catch(e){} } };
+
+/* ---------- 암호 해제 ---------- */
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function decrypt(pack, pw){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(pack.salt), iterations:pack.iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['decrypt']);
+  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, key, b64d(pack.ct));
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+let DB = null, PACK = null;
+async function boot(){
+  try {
+    const r = await fetch('data.enc?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    PACK = await r.json();
+  } catch(e) {
+    $('loadErr').textContent = '명단 파일(data.enc)을 불러오지 못했습니다. 인터넷 연결을 확인하거나 관리자에게 문의하세요.';
+    $('loadErr').hidden = false; return;
+  }
+  const saved = store.get('ifc-pw');
+  if (saved) { try { open(await decrypt(PACK, saved)); return; } catch(e) { store.del('ifc-pw'); } }
+  $('lock').hidden = false; $('pw').focus();
+}
+$('lock').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pw = $('pw').value; if (!pw) return;
+  $('pwBtn').disabled = true; $('pwErr').hidden = true;
+  try { const d = await decrypt(PACK, pw); store.set('ifc-pw', pw); $('lock').hidden = true; open(d); }
+  catch(err) { $('pwErr').textContent = '비밀번호가 맞지 않습니다. 명단이 새로 바뀌면서 비밀번호가 바뀌었을 수도 있습니다.'; $('pwErr').hidden = false; }
+  $('pwBtn').disabled = false;
+});
+$('logout').onclick = () => { store.del('ifc-pw'); location.reload(); };
+
+/* ---------- 조회 ---------- */
+const norm = s => String(s || '').replace(/[\s\-·.]/g, '').replace(/^(서울|경기|인천|부산|대구|광주|대전|울산|세종|강원|충북|충남|전북|전남|경북|경남|제주)/, '');
+const digits = s => String(s || '').replace(/\D/g, '');
+let PLATES = [];   // [{n, p, t4, front, pass:[], season:[], void:[]}]
+
+function open(d){
+  DB = d;
+  const map = new Map();
+  const add = (r, kind) => {
+    const n = norm(r.n || r.p); if (!n) return;
+    if (!map.has(n)) { const dd = digits(n); map.set(n, {n, p:r.p, t4:dd.slice(-4), front:digits(n.split(/[가-힣]/)[0]), pass:[], season:[], void:[]}); }
+    map.get(n)[kind].push(r);
+  };
+  (d.pass||[]).forEach(r => add(r,'pass')); (d.season||[]).forEach(r => add(r,'season')); (d.void||[]).forEach(r => add(r,'void'));
+  PLATES = [...map.values()];
+  $('main').hidden = false;
+  $('meta').textContent = '명단 ' + (d.updated || '');
+  const np = new Set((d.pass||[]).map(r => norm(r.n))).size, ns = new Set((d.season||[]).map(r => norm(r.n))).size;
+  $('counts').textContent = `비표 ${np}대 · 정기권 ${ns ? ns + '대' : '명단 없음'}`;
+  render('');
+  if (store.get('ifc-cam') === '1') startCam();
+}
+
+function find(raw, ocrDigits){
+  const q = norm(raw), d = digits(q), hasHan = /[가-힣]/.test(q);
+  if (!q) return null;
+  if (!d && hasHan) {
+    const k = q.toLowerCase();
+    return {mode:'company', list: PLATES.filter(x => [...x.pass, ...x.season].some(r => norm(r.c).toLowerCase().includes(k)))};
+  }
+  if (d.length < 4) return {mode:'short'};
+  const t = d.slice(-4);
+  let list = PLATES.filter(x => x.t4 === t);
+  if (hasHan && d.length >= 6) {
+    const ex = list.filter(x => x.n === q);
+    if (ex.length) return {mode:'exact', list: ex};
+  }
+  // 앞자리 숫자가 맞는 차량을 앞으로
+  const lead = ocrDigits || (hasHan ? digits(q.split(/[가-힣]/)[0]) : '');
+  if (lead) list.sort((a,b) => (lead.startsWith(b.front) && b.front ? 1 : 0) - (lead.startsWith(a.front) && a.front ? 1 : 0));
+  return {mode: hasHan ? 'full' : 'tail', list, t};
+}
+
+const telHtml = p => { p = String(p || '').trim(); if (!p) return ''; const n = p.replace(/[^\d+]/g, '');
+  return n.length >= 7 ? `<a class="ph" href="tel:${esc(n)}">${esc(p)}</a>` : `<span class="ph">${esc(p)}</span>`; };
+function hl(plate, t){ if (!t) return esc(plate); const i = plate.lastIndexOf(t); return i < 0 ? esc(plate) : esc(plate.slice(0,i)) + '<mark>' + esc(t) + '</mark>' + esc(plate.slice(i+4)); }
+const isActive = x => x.pass.length || x.season.length;
+
+function card(x, t){
+  const tags = [];
+  const bld = [...new Set(x.pass.map(r => r.b))].join('·');
+  if (x.pass.length) tags.push(`<span class="tag t-ok">드랍존 비표${bld ? ' ' + esc(bld) : ''}</span>`);
+  if (x.season.length) tags.push(`<span class="tag t-ok">지하 정기권${x.season[0].b ? ' ' + esc(x.season[0].b) : ''}</span>`);
+  if (!isActive(x) && x.void.length) tags.push(`<span class="tag t-bad">${esc(x.void[0].st || '해지')} 비표</span>`);
+  const r = x.pass[0] || x.season[0] || x.void[0];
+  const warns = [...new Set([...x.pass, ...x.season].flatMap(r => r.w || []))];
+  const extra = x.pass.length > 1 ? x.pass.slice(1).map(o => `<div class="warn">같은 차량 다른 등록: ${esc(o.b)} ${esc(o.c)} (관리번호 ${esc(o.no)})</div>`).join('') : '';
+  return `<div class="card">
+    <div class="top"><span class="plate">${hl(x.p, t)}</span>${tags.join('')}</div>
+    <dl><dt>회사</dt><dd>${esc(r.c) || '-'}</dd>
+      <dt>차종</dt><dd>${esc(r.m) || '-'}</dd>
+      <dt>기사</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>
+      <dt>담당자</dt><dd>${esc(r.mg) || '-'}${telHtml(r.mp)}${r.ext ? `<span class="ph">내선 ${esc(r.ext)}</span>` : ''}</dd>
+      ${x.season[0] && x.season[0].exp ? `<dt>정기권 만료</dt><dd>${esc(x.season[0].exp)}</dd>` : ''}
+      <dt>관리번호</dt><dd>${esc(r.no) || '-'}${r.dt ? ' · ' + esc(r.dt) : ''}</dd>
+      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}</dl>
+    ${warns.map(w => `<div class="warn">확인 필요: ${esc(w)}</div>`).join('')}${extra}</div>`;
+}
+const vd = (cls, lbl, big, sub) => `<div class="verdict ${cls}" role="status"><span class="lbl">${lbl}</span><span class="big">${big}</span>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
+function kindLabel(x){
+  if (x.pass.length && x.season.length) return '정기권 + 드랍존 비표';
+  if (x.season.length) return '지하 정기권';
+  return '드랍존 비표';
+}
+
+function render(raw, ocrDigits){
+  const res = find(raw, ocrDigits);
+  if (!res) { $('out').innerHTML = ''; return null; }
+  if (res.mode === 'short') { $('out').innerHTML = `<p class="hint">숫자 4자리를 입력하세요.</p>`; return null; }
+  const active = res.list.filter(isActive), dead = res.list.filter(x => !isActive(x));
+  let v;
+  if (res.mode === 'company') {
+    v = active.length ? vd('v-ok', '회사명 검색', `${active.length}대 등록`, '') : vd('v-none', '회사명 검색', '등록된 차량 없음', '');
+  } else if (active.length === 1) {
+    const x = active[0], w = [...x.pass, ...x.season].some(r => (r.w||[]).length) || x.pass.length > 1;
+    v = vd(w ? 'v-warn' : 'v-ok', kindLabel(x), '등록 차량', esc((x.pass[0]||x.season[0]).c) + (w ? ' · 명단 확인 필요' : '') + (res.mode === 'full' && x.n !== norm(raw) ? ' · 한글은 직접 확인' : ''));
+  } else if (active.length > 1) {
+    v = vd('v-warn', `뒤 4자리 ${esc(res.t)}`, `${active.length}대 일치`, '앞자리를 보고 해당 차량을 확인하세요');
+  } else if (dead.length) {
+    v = vd('v-bad', '사용 불가', `${esc(dead[0].void[0].st || '해지')} 처리된 비표`, '등록 명단에는 없고 해지·분실 기록만 있습니다');
+  } else {
+    v = vd('v-bad', `뒤 4자리 ${esc(res.t)}`, '미등록 차량', (DB.season||[]).length ? '비표·정기권 명단에 없습니다' : '비표 명단에 없습니다 · 정기권 명단은 아직 없음');
+  }
+  const t = res.t;
+  $('out').innerHTML = `<div class="cards">${v}${active.map(x => card(x, t)).join('')}${dead.length ? '<p class="section-h">해지·분실 기록</p>' + dead.map(x => card(x, t)).join('') : ''}</div>`;
+  return active.length ? 'ok' : 'none';
+}
+$('q').addEventListener('input', e => render(e.target.value));
+$('f').addEventListener('submit', e => { e.preventDefault(); $('q').blur(); });
+$('clr').onclick = () => { $('q').value = ''; render(''); lastShown = ''; };
+
+/* ---------- 카메라 + 숫자 인식 ---------- */
+let stream = null, worker = null, scanning = false, busy = false, lastShown = '', reads = [];
+const crop = document.createElement('canvas');
+const cctx = crop.getContext('2d', {willReadFrequently:true});
+
+async function startCam(){
+  $('camStart').disabled = true; $('camOverMsg').textContent = '카메라 켜는 중…';
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false});
+  } catch(e) {
+    $('camOverMsg').textContent = e && e.name === 'NotAllowedError'
+      ? '카메라 권한이 거부되었습니다. 브라우저 설정에서 이 사이트의 카메라를 허용한 뒤 다시 누르세요.'
+      : '카메라를 켤 수 없습니다. 사파리나 크롬에서 열었는지 확인하세요.';
+    $('camStart').disabled = false; return;
+  }
+  const v = $('video'); v.srcObject = stream; await v.play().catch(()=>{});
+  store.set('ifc-cam', '1');
+  $('camover').hidden = true; $('guide').hidden = false; $('camstat').hidden = false; $('camctl').hidden = false;
+  if (!worker) {
+    $('camMsg').textContent = '인식 엔진 준비 중… (처음 한 번은 조금 걸립니다)';
+    try {
+      worker = await Tesseract.createWorker('eng', 1, window.TESS_OPTS || {});
+      await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
+    } catch(e) { $('camMsg').textContent = '인식 엔진을 불러오지 못했습니다. 직접 입력으로 조회하세요.'; return; }
+  }
+  $('camMsg').textContent = '번호판을 네모 안에 맞춰주세요';
+  scanning = true; loop();
+}
+$('camStart').onclick = startCam;
+$('pauseBtn').onclick = () => {
+  scanning = !scanning; $('pauseBtn').textContent = scanning ? '일시정지' : '다시 시작';
+  $('camMsg').textContent = scanning ? '번호판을 네모 안에 맞춰주세요' : '일시정지됨';
+  if (scanning) { lastShown = ''; reads = []; loop(); }
+};
+document.addEventListener('visibilitychange', () => { if (document.hidden && stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; } });
+
+function grabPlate(){
+  const v = $('video'), g = $('guide'), box = $('cam').getBoundingClientRect(), gb = g.getBoundingClientRect();
+  const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return null;
+  // object-fit: cover 보정
+  const s = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * s) / 2, oy = (box.height - vh * s) / 2;
+  const sx = (gb.left - box.left - ox) / s, sy = (gb.top - box.top - oy) / s, sw = gb.width / s, sh = gb.height / s;
+  const H = 110, W = Math.round(H * sw / sh);
+  crop.width = W; crop.height = H;
+  cctx.drawImage(v, sx, sy, sw, sh, 0, 0, W, H);
+  const img = cctx.getImageData(0, 0, W, H), d = img.data, n = W * H, gray = new Uint8Array(n), hist = new Array(256).fill(0);
+  for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; gray[i] = y; hist[y]++; }
+  // Otsu
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) ** 2; if (b > best) { best = b; th = i; } }
+  let dark = 0; for (let i = 0; i < n; i++) if (gray[i] <= th) dark++;
+  const inv = dark > n * 0.55; // 글자가 밝은 번호판(녹색 등)이면 뒤집기
+  for (let i = 0; i < n; i++) { let on = gray[i] <= th; if (inv) on = !on; const c = on ? 0 : 255; d[i*4] = d[i*4+1] = d[i*4+2] = c; d[i*4+3] = 255; }
+  cctx.putImageData(img, 0, 0);
+  return crop;
+}
+
+function parseRead(text){
+  const groups = (text.match(/\d+/g) || []);
+  const all = groups.join('');
+  if (all.length < 4) return null;
+  // 마지막 덩어리가 4자리면 그것, 아니면 전체 숫자의 끝 4자리
+  const last = groups[groups.length - 1];
+  const t4 = last.length >= 4 ? last.slice(-4) : all.slice(-4);
+  if (all.length > 9) return null;
+  return {t4, lead: all.slice(0, Math.max(0, all.length - 4))};
+}
+
+async function loop(){
+  if (!scanning || busy) return;
+  busy = true;
+  try {
+    const c = grabPlate();
+    if (c) {
+      const { data } = await worker.recognize(c);
+      const r = parseRead(data.text || '');
+      reads.push(r ? r.t4 : null); if (reads.length > 4) reads.shift();
+      if (r) $('camRead').textContent = r.t4;
+      const cnt = r ? reads.filter(x => x === r.t4).length : 0;
+      if (r && cnt >= 2 && r.t4 !== lastShown) {
+        lastShown = r.t4;
+        $('q').value = r.t4;
+        const st = render(r.t4, r.lead);
+        $('guide').classList.add('hit'); setTimeout(() => $('guide').classList.remove('hit'), 600);
+        if (navigator.vibrate) navigator.vibrate(st === 'ok' ? 60 : [80, 60, 80]);
+        $('camMsg').textContent = '조회됨 · 다른 차량을 비추면 다시 조회합니다';
+      }
+    }
+  } catch(e) { /* 한 프레임 실패는 무시 */ }
+  busy = false;
+  if (scanning) setTimeout(loop, 120);
+}
+
+boot();
+</script>
+</body>
+</html>
