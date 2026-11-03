@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>차량조회 명단 관리</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{--bg:#eef1f4;--panel:#fff;--fg:#14202b;--muted:#5b6876;--line:#d5dbe2;--accent:#1d5fd1;--accent-fg:#fff;--ok:#0f7a43;--ok-bg:#e3f4ea;--bad:#b42318;--warn:#9a5b00;--warn-bg:#fff3d6;
+  --f:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+@media (prefers-color-scheme: dark){:root{--bg:#0f151b;--panel:#18212a;--fg:#e8edf2;--muted:#93a0ad;--line:#2a3642;--accent:#5b93f0;--accent-fg:#0b1220;--ok:#4fd18b;--ok-bg:#12321f;--bad:#ff8a7a;--warn:#f2bf55;--warn-bg:#352708;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--f);padding:24px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+[hidden]{display:none!important}
+.wrap{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+h1{font-size:22px;margin:0}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px}
+.step h2{font-size:16px;margin:0}
+.step h2 span{color:var(--accent);margin-right:6px;font-variant-numeric:tabular-nums}
+.hint{color:var(--muted);font-size:13.5px;margin:0}
+input[type=password],input[type=text]{font:500 16px var(--f);padding:11px 12px;border:2px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg);width:100%;max-width:360px}
+input[type=file]{font:14px var(--f)}
+.btn{font:700 15px var(--f);border-radius:10px;padding:12px 18px;cursor:pointer;border:2px solid var(--accent);background:var(--accent);color:var(--accent-fg);align-self:flex-start}
+.btn[disabled]{opacity:.5;cursor:default}
+.err{color:var(--bad);font-weight:500;margin:0}
+.ok{background:var(--ok-bg);color:var(--ok);border-radius:8px;padding:10px 12px;font-weight:500;margin:0}
+table{border-collapse:collapse;font-size:14px;width:100%}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:500}
+td.n{font-variant-numeric:tabular-nums;text-align:right}
+.scroll{overflow-x:auto;max-height:420px;overflow-y:auto;border:1px solid var(--line);border-radius:8px}
+.warn td{background:var(--warn-bg)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>차량조회 명단 관리</h1>
+  <p class="hint">엑셀 파일은 이 컴퓨터 안에서만 읽고 암호화합니다. 인터넷으로 보내지 않습니다. 만들어진 <b>data.enc</b> 파일을 GitHub에 올리면 모든 직원 휴대폰에 반영됩니다.</p>
+
+  <section class="step">
+    <h2><span>1</span>드랍존 비표 엑셀</h2>
+    <p class="hint">ONE / TWO / THREE 시트의 '등록' 차량과 '해지 분실' 시트를 읽습니다.</p>
+    <input type="file" id="fPass" accept=".xlsx,.xls">
+  </section>
+
+  <section class="step">
+    <h2><span>2</span>지하 정기권 엑셀 <span style="color:var(--muted);font-weight:400">(있을 때만)</span></h2>
+    <p class="hint">'차량번호' 열이 있는 시트를 모두 읽습니다. 업데이트할 때마다 두 파일을 함께 넣어주세요.</p>
+    <input type="file" id="fSeason" accept=".xlsx,.xls">
+  </section>
+
+  <section class="step" id="preview" hidden>
+    <h2><span>3</span>읽은 내용 확인</h2>
+    <div id="summary"></div>
+    <div id="warnBox"></div>
+  </section>
+
+  <section class="step">
+    <h2><span>4</span>비밀번호 정하고 파일 만들기</h2>
+    <p class="hint">직원들이 처음 한 번 입력할 비밀번호입니다. 비밀번호를 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 합니다.</p>
+    <input type="password" id="pw1" placeholder="비밀번호 (8자 이상)" autocomplete="new-password">
+    <input type="password" id="pw2" placeholder="비밀번호 확인" autocomplete="new-password">
+    <p class="err" id="err" hidden></p>
+    <button class="btn" id="make" disabled>data.enc 만들기</button>
+    <p class="ok" id="done" hidden></p>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const s = v => v == null ? '' : String(v).trim();
+const norm = p => String(p || '').replace(/[\s\-·.]/g, '');
+const BLD = {ONE:'1IFC', TWO:'2IFC', THREE:'3IFC', '1IFC':'1IFC', '2IFC':'2IFC', '3IFC':'3IFC', 'ONE IFC':'1IFC', 'TWO IFC':'2IFC', 'THREE IFC':'3IFC'};
+const bld = v => BLD[s(v).toUpperCase()] || BLD[s(v).toUpperCase().replace(/\s/g,'')] || s(v);
+const ds = v => v instanceof Date ? v.getFullYear() + '-' + String(v.getMonth()+1).padStart(2,'0') + '-' + String(v.getDate()).padStart(2,'0') : s(v);
+
+function readSheet(ws){
+  if (!ws['!ref']) return null;
+  const rg = XLSX.utils.decode_range(ws['!ref']); rg.e.c = Math.min(rg.e.c, 40); rg.e.r = Math.min(rg.e.r, 5000);
+  const rows = XLSX.utils.sheet_to_json(ws, {header:1, raw:true, range:rg, blankrows:false, defval:null});
+  const hi = rows.slice(0, 8).findIndex(r => r.some(c => s(c).replace(/\s/g,'') === '차량번호'));
+  if (hi < 0) return null;
+  const H = {}; rows[hi].forEach((c, i) => { const k = s(c).replace(/\s/g,''); if (k && !(k in H)) H[k] = i; });
+  const col = (r, ...names) => { for (const nm of names) { if (nm in H) return r[H[nm]]; const k = Object.keys(H).find(h => h.includes(nm)); if (k) return r[H[k]]; } return null; };
+  return rows.slice(hi + 1).map(r => ({
+    gu: s(col(r,'구분')), dt: ds(col(r,'일자','신청일자','등록일')), c: s(col(r,'회사명','회사','입주사')), ow: s(col(r,'차주(직급)','차주')),
+    no: s(col(r,'관리번호','비표번호')), m: s(col(r,'차종')), p: s(col(r,'차량번호')), d: s(col(r,'차량기사명','기사명','기사')),
+    dp: s(col(r,'연락처')), mg: s(col(r,'담당자')), ext: s(col(r,'내선번호','내선')), mp: s(col(r,'핸드폰번호','핸드폰','휴대폰')),
+    st: s(col(r,'등록여부','상태')), o: s(col(r,'비고')), exp: ds(col(r,'만료일','종료일','만료')),
+  })).filter(x => x.p);
+}
+
+let PASS = [], VOID = [], SEASON = [], WARN = [], SKIP = [], wbInfo = {};
+async function load(file){ const buf = await file.arrayBuffer(); return XLSX.read(buf, {cellDates:true}); }
+const plateOK = p => /^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/.test(norm(p));
+
+async function parseAll(){
+  PASS = []; VOID = []; SEASON = []; SKIP = []; wbInfo = {used:[], ignored:[]};
+  const fp = $('fPass').files[0], fs = $('fSeason').files[0];
+  if (fp) {
+    const wb = await load(fp);
+    for (const name of wb.SheetNames) {
+      const b = BLD[name.toUpperCase().trim()];
+      const isVoid = /해지|분실/.test(name);
+      if (!b && !isVoid) { wbInfo.ignored.push(name); continue; }
+      const rows = readSheet(wb.Sheets[name]); if (!rows) { wbInfo.ignored.push(name); continue; }
+      wbInfo.used.push(name);
+      for (const r of rows) {
+        const n = norm(r.p);
+        if (b) {
+          if (r.st !== '등록') continue;
+          if (/^\d{1,5}$/.test(n)) { SKIP.push(`${b} ${r.c} ${r.p} (차량번호 없는 공용비표)`); continue; }
+          PASS.push({b, p:r.p, n, c:r.c, m:r.m, d:r.d, dp:r.dp, mg:r.mg, ext:r.ext, mp:r.mp, no:r.no, dt:r.dt, o:r.o, w:[]});
+        } else {
+          VOID.push({b:bld(r.gu), p:r.p, n, c:r.c, m:r.m, d:r.d, dp:r.dp, mg:r.mg, ext:r.ext, mp:r.mp, no:r.no, dt:r.dt, o:r.o, st:r.st || '해지'});
+        }
+      }
+    }
+  }
+  if (fs) {
+    const wb = await load(fs);
+    for (const name of wb.SheetNames) {
+      const rows = readSheet(wb.Sheets[name]); if (!rows) continue;
+      wbInfo.used.push('정기권:' + name);
+      for (const r of rows) {
+        if (/해지|만료|분실|취소|대기/.test(r.st)) continue;
+        SEASON.push({b: bld(r.gu) || BLD[name.toUpperCase().trim()] || '', p:r.p, n:norm(r.p), c:r.c, m:r.m, d:r.d || r.ow, dp:r.dp, mg:r.mg, ext:r.ext, mp:r.mp, no:r.no, dt:r.dt, exp:r.exp, o:r.o, w:[]});
+      }
+    }
+  }
+  // 자동 점검
+  WARN = [];
+  const flag = (r, msg) => { if (!r.w.includes(msg)) r.w.push(msg); };
+  const byN = {}; PASS.forEach(r => (byN[r.n] = byN[r.n] || []).push(r));
+  for (const [n, list] of Object.entries(byN)) if (list.length > 1) {
+    const msg = `같은 차량이 ${list.length}번 등록됨 (` + list.map(r => `${r.b} ${r.c} ${r.no}번`).join(', ') + ')';
+    list.forEach(r => flag(r, msg)); WARN.push([n, msg]);
+  }
+  for (const r of PASS) for (const v of VOID) if (v.n === r.n && v.dt && r.dt && (v.dt > r.dt || (v.dt === r.dt && !/분실|훼손/.test(v.st)))) {
+    const msg = `해지·분실 명단에도 있음 (${v.dt} ${v.st}${v.o ? ', ' + v.o : ''})`; flag(r, msg); WARN.push([r.p, msg]);
+  }
+  const byNo = {}; PASS.forEach(r => { if (r.no) (byNo[r.b + '|' + r.no] = byNo[r.b + '|' + r.no] || []).push(r); });
+  for (const [k, list] of Object.entries(byNo)) {
+    const plates = [...new Set(list.map(r => r.n))]; if (plates.length < 2) continue;
+    const [b, no] = k.split('|'); const msg = `${b} 관리번호 ${no}번을 다른 차량과 같이 씀 (${plates.join(', ')})`;
+    list.forEach(r => flag(r, `관리번호 ${no}번을 다른 차량과 같이 씀`)); WARN.push([plates.join(', '), msg]);
+  }
+  [...PASS, ...SEASON].forEach(r => { if (!plateOK(r.p)) { flag(r, '번호판 형식 확인 필요'); WARN.push([r.p, `번호판 형식이 이상함: '${r.p}' (${r.c})`]); } });
+  showPreview();
+}
+
+function showPreview(){
+  $('preview').hidden = !(PASS.length || SEASON.length);
+  const cnt = (list, b) => new Set(list.filter(r => !b || r.b === b).map(r => r.n)).size;
+  $('summary').innerHTML = `<table><tr><th>구분</th><th>1IFC</th><th>2IFC</th><th>3IFC</th><th>합계(차량)</th></tr>
+    <tr><td>드랍존 비표</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(PASS,b)}</td>`).join('')}<td class="n">${cnt(PASS)}</td></tr>
+    <tr><td>지하 정기권</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(SEASON,b)}</td>`).join('')}<td class="n">${cnt(SEASON) || '없음'}</td></tr>
+    <tr><td>해지·분실 기록</td><td colspan="3"></td><td class="n">${VOID.length}</td></tr></table>
+    <p class="hint">읽은 시트: ${esc(wbInfo.used.join(', '))}${wbInfo.ignored.length ? ' · 건너뛴 시트: ' + esc(wbInfo.ignored.join(', ')) : ''}${SKIP.length ? '<br>제외: ' + SKIP.map(esc).join(' / ') : ''}</p>`;
+  const uniqW = [...new Map(WARN.map(w => [w[1], w])).values()];
+  $('warnBox').innerHTML = uniqW.length ? `<p class="hint"><b>확인 필요 ${uniqW.length}건</b> — 조회 화면에도 노란색 경고로 표시됩니다. 엑셀을 정리한 뒤 다시 만들면 사라집니다.</p>
+    <div class="scroll"><table>${uniqW.map(w => `<tr class="warn"><td>${esc(w[1])}</td></tr>`).join('')}</table></div>` : '<p class="ok">중복이나 이상한 데이터가 없습니다.</p>';
+  check();
+}
+
+function check(){
+  const a = $('pw1').value, b = $('pw2').value; let msg = '';
+  if (!PASS.length && !SEASON.length) msg = '';
+  else if (a && a.length < 8) msg = '비밀번호는 8자 이상으로 정하세요.';
+  else if (a && b && a !== b) msg = '두 비밀번호가 다릅니다.';
+  $('err').textContent = msg; $('err').hidden = !msg;
+  $('make').disabled = !((PASS.length || SEASON.length) && a.length >= 8 && a === b);
+}
+['fPass','fSeason'].forEach(id => $(id).addEventListener('change', () => parseAll().catch(e => { $('err').textContent = '엑셀을 읽지 못했습니다: ' + e.message; $('err').hidden = false; })));
+['pw1','pw2'].forEach(id => $(id).addEventListener('input', check));
+
+const b64 = u8 => { let str = ''; for (let i = 0; i < u8.length; i += 0x8000) str += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(str); };
+async function encrypt(obj, pw){
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 250000;
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj))));
+  return {v:1, iter, salt:b64(salt), iv:b64(iv), ct:b64(ct)};
+}
+$('make').onclick = async () => {
+  $('make').disabled = true;
+  const now = new Date(), updated = ds(now) + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  const pack = await encrypt({updated, pass:PASS, void:VOID, season:SEASON}, $('pw1').value);
+  const blob = new Blob([JSON.stringify(pack)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.enc'; document.body.appendChild(a); a.click(); a.remove();
+  window.__lastPack = pack;
+  $('done').textContent = `data.enc 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
+  $('done').hidden = false; $('make').disabled = false;
+};
+</script>
+</body>
+</html>
