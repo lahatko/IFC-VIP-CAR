@@ -268,9 +268,9 @@ $('f').addEventListener('submit', e => { e.preventDefault(); $('q').blur(); });
 $('clr').onclick = () => { $('q').value = ''; render(''); lastShown = ''; };
 
 /* ---------- 카메라 + 숫자 인식 ---------- */
-let stream = null, worker = null, scanning = false, busy = false, lastShown = '', reads = [];
-const crop = document.createElement('canvas');
-const cctx = crop.getContext('2d', {willReadFrequently:true});
+let stream = null, scanning = false, lastShown = '', reads = [];
+const lanes = [];   // 휴대폰 코어 수에 따라 1~2개를 동시에 돌림
+function newCanvas(){ const c = document.createElement('canvas'); return {c, x: c.getContext('2d', {willReadFrequently:true})}; }
 
 async function startCam(){
   $('camStart').disabled = true; $('camOverMsg').textContent = '카메라 켜는 중…';
@@ -285,55 +285,86 @@ async function startCam(){
   const v = $('video'); v.srcObject = stream; await v.play().catch(()=>{});
   store.set('ifc-cam', '1');
   $('camover').hidden = true; $('guide').hidden = false; $('camstat').hidden = false; $('camctl').hidden = false;
-  if (!worker) {
+  if (!lanes.length) {
     $('camMsg').textContent = '인식 엔진 준비 중… (처음 한 번은 조금 걸립니다)';
+    const want = (navigator.hardwareConcurrency || 2) >= 4 ? 2 : 1;
     try {
-      worker = await Tesseract.createWorker('eng', 1, window.TESS_OPTS || {});
-      await worker.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
-    } catch(e) { $('camMsg').textContent = '인식 엔진을 불러오지 못했습니다. 직접 입력으로 조회하세요.'; return; }
+      for (let i = 0; i < want; i++) {
+        const w = await Tesseract.createWorker('eng', 1, window.TESS_OPTS || {});
+        await w.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
+        lanes.push({w, busy:false, a:newCanvas(), b:newCanvas()});
+      }
+    } catch(e) { if (!lanes.length) { $('camMsg').textContent = '인식 엔진을 불러오지 못했습니다. 직접 입력으로 조회하세요.'; return; } }
   }
   $('camMsg').textContent = '번호판을 네모 안에 맞춰주세요';
-  scanning = true; loop();
+  scanning = true; runAll();
 }
+function runAll(){ lanes.forEach((L, i) => setTimeout(() => loop(L), i * 150)); }
 $('camStart').onclick = startCam;
 $('pauseBtn').onclick = () => {
   scanning = !scanning; $('pauseBtn').textContent = scanning ? '일시정지' : '다시 시작';
   $('camMsg').textContent = scanning ? '번호판을 네모 안에 맞춰주세요' : '일시정지됨';
-  if (scanning) { lastShown = ''; reads = []; loop(); }
+  if (scanning) { lastShown = ''; reads = []; runAll(); }
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; } });
 
-function grabPlate(){
-  const v = $('video'), g = $('guide'), box = $('cam').getBoundingClientRect(), gb = g.getBoundingClientRect();
+// 1차: 네모 안을 잘라 흑백으로
+function grabPlate(L){
+  const v = $('video'), box = $('cam').getBoundingClientRect(), gb = $('guide').getBoundingClientRect();
   const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return null;
-  // object-fit: cover 보정
-  const s = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * s) / 2, oy = (box.height - vh * s) / 2;
+  const s = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * s) / 2, oy = (box.height - vh * s) / 2;   // object-fit: cover 보정
   const sx = (gb.left - box.left - ox) / s, sy = (gb.top - box.top - oy) / s, sw = gb.width / s, sh = gb.height / s;
-  const H = 110, W = Math.round(H * sw / sh);
-  crop.width = W; crop.height = H;
-  cctx.drawImage(v, sx, sy, sw, sh, 0, 0, W, H);
-  const img = cctx.getImageData(0, 0, W, H), d = img.data, n = W * H, gray = new Uint8Array(n), hist = new Array(256).fill(0);
+  const H = 110, W = Math.round(H * sw / sh), {c, x} = L.a;
+  c.width = W; c.height = H;
+  x.drawImage(v, sx, sy, sw, sh, 0, 0, W, H);
+  const img = x.getImageData(0, 0, W, H), d = img.data, n = W * H, gray = new Uint8Array(n), hist = new Array(256).fill(0);
   for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; gray[i] = y; hist[y]++; }
-  // Otsu
   let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
   let sB = 0, wB = 0, best = 0, th = 128;
   for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += i * hist[i];
     const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) ** 2; if (b > best) { best = b; th = i; } }
   let dark = 0; for (let i = 0; i < n; i++) if (gray[i] <= th) dark++;
-  const inv = dark > n * 0.55; // 글자가 밝은 번호판(녹색 등)이면 뒤집기
-  for (let i = 0; i < n; i++) { let on = gray[i] <= th; if (inv) on = !on; const c = on ? 0 : 255; d[i*4] = d[i*4+1] = d[i*4+2] = c; d[i*4+3] = 255; }
-  cctx.putImageData(img, 0, 0);
-  return crop;
+  const inv = dark > n * 0.55;   // 글자가 밝은 번호판(녹색 등)이면 뒤집기
+  const on = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { let o = gray[i] <= th; if (inv) o = !o; on[i] = o ? 1 : 0; const cc = o ? 0 : 255; d[i*4] = d[i*4+1] = d[i*4+2] = cc; d[i*4+3] = 255; }
+  x.putImageData(img, 0, 0);
+  return {c, on, W, H};
+}
+
+// 2차: 번호판 테두리·가장자리·잡티를 지운 이미지 (1차에서 못 읽었을 때만)
+function cleanPlate(L, f){
+  const {on, W, H} = f, lab = new Int32Array(W * H), keep = [0], stack = [];
+  let id = 0;
+  for (let p = 0; p < W * H; p++) {
+    if (!on[p] || lab[p]) continue;
+    id++; let x0 = W, x1 = 0, y0 = H, y1 = 0, edge = false; stack.push(p); lab[p] = id;
+    while (stack.length) {
+      const q = stack.pop(), qx = q % W, qy = (q / W) | 0;
+      if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+      if (qx === 0 || qy === 0 || qx === W - 1 || qy === H - 1) edge = true;
+      if (qx > 0 && on[q-1] && !lab[q-1]) { lab[q-1] = id; stack.push(q-1); }
+      if (qx < W-1 && on[q+1] && !lab[q+1]) { lab[q+1] = id; stack.push(q+1); }
+      if (qy > 0 && on[q-W] && !lab[q-W]) { lab[q-W] = id; stack.push(q-W); }
+      if (qy < H-1 && on[q+W] && !lab[q+W]) { lab[q+W] = id; stack.push(q+W); }
+    }
+    const h = y1 - y0 + 1, w = x1 - x0 + 1;
+    keep[id] = !(edge || h < H * 0.25 || h > H * 0.9 || w > W * 0.3);
+  }
+  const P = 10, {c, x} = L.b; c.width = W + 2 * P; c.height = H + 2 * P;
+  const img = x.createImageData(c.width, c.height), d = img.data; d.fill(255);
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const p = y * W + xx; if (lab[p] && keep[lab[p]]) { const o = ((y + P) * c.width + xx + P) * 4; d[o] = d[o+1] = d[o+2] = 0; }
+  }
+  x.putImageData(img, 0, 0);
+  return c;
 }
 
 function parseRead(text){
   const groups = (text.match(/\d+/g) || []);
   const all = groups.join('');
-  if (all.length < 4) return null;
-  // 마지막 덩어리가 4자리면 그것, 아니면 전체 숫자의 끝 4자리
-  const last = groups[groups.length - 1];
+  if (all.length < 4 || all.length > 9) return null;
+  const last = groups[groups.length - 1];   // 마지막 덩어리가 4자리면 그것, 아니면 전체 숫자의 끝 4자리
   const t4 = last.length >= 4 ? last.slice(-4) : all.slice(-4);
-  if (all.length > 9) return null;
   return {t4, lead: all.slice(0, Math.max(0, all.length - 4))};
 }
 
@@ -347,25 +378,28 @@ function showRead(t4, lead){
 // 오른쪽 아래 숫자를 누르면 바로 조회
 $('camRead').addEventListener('click', () => { const t = $('camRead').textContent; if (/^\d{4}$/.test(t)) showRead(t, ''); });
 
-async function loop(){
-  if (!scanning || busy) return;
-  busy = true;
+function handleRead(r){
+  reads.push(r ? r.t4 : null); if (reads.length > 8) reads.shift();
+  if (!r) return;
+  $('camRead').textContent = r.t4;
+  const known = PLATES.some(x => x.t4 === r.t4);    // 명단에 있는 번호면 한 번만 읽혀도 조회
+  const cnt = reads.filter(x => x === r.t4).length;   // 명단에 없으면 두 번 읽혀야 '미등록' 표시
+  if (r.t4 !== lastShown && (known || cnt >= 2)) showRead(r.t4, r.lead);
+}
+
+async function loop(L){
+  if (!scanning || L.busy) return;
+  L.busy = true;
   try {
-    const c = grabPlate();
-    if (c) {
-      const { data } = await worker.recognize(c);
-      const r = parseRead(data.text || '');
-      reads.push(r ? r.t4 : null); if (reads.length > 6) reads.shift();
-      if (r) {
-        $('camRead').textContent = r.t4;
-        const known = PLATES.some(x => x.t4 === r.t4);           // 명단에 있는 번호면 한 번만 읽혀도 조회
-        const cnt = reads.filter(x => x === r.t4).length;          // 명단에 없으면 두 번 읽혀야 '미등록' 표시
-        if (r.t4 !== lastShown && (known || cnt >= 2)) showRead(r.t4, r.lead);
-      }
+    const f = grabPlate(L);
+    if (f) {
+      let r = parseRead((await L.w.recognize(f.c)).data.text || '');
+      if (!r && scanning) r = parseRead((await L.w.recognize(cleanPlate(L, f))).data.text || '');
+      handleRead(r);
     }
   } catch(e) { console.warn(e); }
-  busy = false;
-  if (scanning) setTimeout(loop, 120);
+  L.busy = false;
+  if (scanning) setTimeout(() => loop(L), 30);
 }
 
 boot();
