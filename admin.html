@@ -57,13 +57,21 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
   </section>
 
   <section class="step">
-    <h2><span>4</span>비밀번호 정하고 파일 만들기</h2>
-    <p class="hint">직원들이 처음 한 번 입력할 비밀번호입니다. 비밀번호를 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 합니다.</p>
-    <input type="password" id="pw1" placeholder="비밀번호 (8자 이상)" autocomplete="new-password">
-    <input type="password" id="pw2" placeholder="비밀번호 확인" autocomplete="new-password">
-    <p class="err" id="err" hidden></p>
+    <h2><span>4</span>명단 파일(data.enc) 만들기</h2>
+    <p class="hint">사이트에 올라가 있는 열쇠(keys.json)로 잠급니다. 비밀번호는 필요 없습니다.</p>
+    <p class="err" id="keyErr" hidden></p>
     <button class="btn" id="make" disabled>data.enc 만들기</button>
     <p class="ok" id="done" hidden></p>
+  </section>
+
+  <section class="step">
+    <h2><span>⚙</span>비밀번호 설정 · 변경 <span style="color:var(--muted);font-weight:400">(처음 한 번, 또는 비밀번호를 바꿀 때만)</span></h2>
+    <p class="hint">새 열쇠 파일(keys.json)을 만듭니다. 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 하고, data.enc도 새 열쇠로 다시 만들어 함께 올려야 합니다.</p>
+    <input type="password" id="pw1" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password">
+    <input type="password" id="pw2" placeholder="새 비밀번호 확인" autocomplete="new-password">
+    <p class="err" id="err" hidden></p>
+    <button class="btn" id="mkKeys" disabled>keys.json 만들기</button>
+    <p class="ok" id="keyDone" hidden></p>
   </section>
 </div>
 
@@ -167,35 +175,65 @@ function showPreview(){
   check();
 }
 
+let PUB = null;   // 공개 열쇠 (잠그기 전용)
+async function loadKeys(){
+  try { const r = await fetch('keys.json?t=' + Date.now(), {cache:'no-store'}); if (!r.ok) throw 0; const k = await r.json(); PUB = await importPub(k.pub); }
+  catch(e) { PUB = null; }
+  check();
+}
 function check(){
   const a = $('pw1').value, b = $('pw2').value; let msg = '';
-  if (!PASS.length && !SEASON.length) msg = '';
-  else if (a && a.length < 8) msg = '비밀번호는 8자 이상으로 정하세요.';
+  if (a && a.length < 8) msg = '비밀번호는 8자 이상으로 정하세요.';
   else if (a && b && a !== b) msg = '두 비밀번호가 다릅니다.';
   $('err').textContent = msg; $('err').hidden = !msg;
-  $('make').disabled = !((PASS.length || SEASON.length) && a.length >= 8 && a === b);
+  $('mkKeys').disabled = !(a.length >= 8 && a === b);
+  const has = PASS.length || SEASON.length;
+  $('keyErr').textContent = PUB ? '' : '사이트에서 열쇠(keys.json)를 찾지 못했습니다. 아래 ⚙ 칸에서 비밀번호를 먼저 설정하세요.';
+  $('keyErr').hidden = !!PUB;
+  $('make').disabled = !(has && PUB);
 }
-['fPass','fSeason'].forEach(id => $(id).addEventListener('change', () => parseAll().catch(e => { $('err').textContent = '엑셀을 읽지 못했습니다: ' + e.message; $('err').hidden = false; })));
+['fPass','fSeason'].forEach(id => $(id).addEventListener('change', () => parseAll().catch(e => { $('keyErr').textContent = '엑셀을 읽지 못했습니다: ' + e.message; $('keyErr').hidden = false; })));
 ['pw1','pw2'].forEach(id => $(id).addEventListener('input', check));
 
-const b64 = u8 => { let str = ''; for (let i = 0; i < u8.length; i += 0x8000) str += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(str); };
-async function encrypt(obj, pw){
-  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 250000;
-  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt']);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, new TextEncoder().encode(JSON.stringify(obj))));
-  return {v:1, iter, salt:b64(salt), iv:b64(iv), ct:b64(ct)};
+const b64 = u8 => { u8 = new Uint8Array(u8); let str = ''; for (let i = 0; i < u8.length; i += 0x8000) str += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(str); };
+const b64d = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+const OAEP = {name:'RSA-OAEP', hash:'SHA-256'};
+const importPub = t => crypto.subtle.importKey('spki', b64d(t), OAEP, false, ['encrypt']);
+function save(name, obj){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj)], {type:'application/json'}));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function encryptData(obj){
+  const raw = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, k, new TextEncoder().encode(JSON.stringify(obj)));
+  const ek = await crypto.subtle.encrypt(OAEP, PUB, raw);
+  return {v:2, updated:obj.updated, ek:b64(ek), iv:b64(iv), ct:b64(ct)};
 }
 $('make').onclick = async () => {
   $('make').disabled = true;
   const now = new Date(), updated = ds(now) + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
-  const pack = await encrypt({updated, pass:PASS, void:VOID, season:SEASON}, $('pw1').value);
-  const blob = new Blob([JSON.stringify(pack)], {type:'application/json'});
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.enc'; document.body.appendChild(a); a.click(); a.remove();
-  window.__lastPack = pack;
+  const pack = await encryptData({updated, pass:PASS, void:VOID, season:SEASON});
+  save('data.enc', pack); window.__lastPack = pack;
   $('done').textContent = `data.enc 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
   $('done').hidden = false; $('make').disabled = false;
 };
+$('mkKeys').onclick = async () => {
+  $('mkKeys').disabled = true;
+  const kp = await crypto.subtle.generateKey({...OAEP, modulusLength:2048, publicExponent:new Uint8Array([1,0,1])}, true, ['encrypt','decrypt']);
+  const pub = b64(await crypto.subtle.exportKey('spki', kp.publicKey));
+  const pk8 = await crypto.subtle.exportKey('pkcs8', kp.privateKey);
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12)), iter = 250000;
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode($('pw1').value), 'PBKDF2', false, ['deriveKey']);
+  const wk = await crypto.subtle.deriveKey({name:'PBKDF2', salt, iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt']);
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, wk, pk8);
+  const keys = {v:2, pub, priv:{iter, salt:b64(salt), iv:b64(iv), ct:b64(ct)}};
+  save('keys.json', keys); window.__lastKeys = keys;
+  PUB = await importPub(pub);
+  $('keyDone').textContent = 'keys.json이 다운로드되었습니다. 위 4번에서 data.enc도 새로 만들어 두 파일을 함께 GitHub에 올리세요.';
+  $('keyDone').hidden = false; $('pw1').value = $('pw2').value = ''; check();
+};
+loadKeys();
 </script>
 </body>
 </html>

@@ -135,19 +135,33 @@ const store = { get(k){ try { return localStorage.getItem(k); } catch(e){ return
 
 /* ---------- 암호 해제 ---------- */
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-async function decrypt(pack, pw){
+async function pwKey(pw, salt, iter, use){
   const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(pack.salt), iterations:pack.iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['decrypt']);
-  const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, key, b64d(pack.ct));
-  return JSON.parse(new TextDecoder().decode(pt));
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(salt), iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, [use]);
+}
+async function decrypt(pack, pw){
+  let plain;
+  if (pack.v === 2) {
+    const p = KEYS.priv;
+    const pk8 = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(p.iv)}, await pwKey(pw, p.salt, p.iter, 'decrypt'), b64d(p.ct));
+    const priv = await crypto.subtle.importKey('pkcs8', pk8, {name:'RSA-OAEP', hash:'SHA-256'}, false, ['decrypt']);
+    const raw = await crypto.subtle.decrypt({name:'RSA-OAEP'}, priv, b64d(pack.ek));
+    const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    plain = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, k, b64d(pack.ct));
+  } else {
+    plain = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, await pwKey(pw, pack.salt, pack.iter, 'decrypt'), b64d(pack.ct));
+  }
+  return JSON.parse(new TextDecoder().decode(plain));
 }
 
+let KEYS = null;
 let DB = null, PACK = null;
 async function boot(){
   try {
     const r = await fetch('data.enc?t=' + Date.now(), {cache:'no-store'});
     if (!r.ok) throw new Error(r.status);
     PACK = await r.json();
+    if (PACK.v === 2) { const k = await fetch('keys.json?t=' + Date.now(), {cache:'no-store'}); if (!k.ok) throw new Error('keys'); KEYS = await k.json(); }
   } catch(e) {
     $('loadErr').textContent = '명단 파일(data.enc)을 불러오지 못했습니다. 인터넷 연결을 확인하거나 관리자에게 문의하세요.';
     $('loadErr').hidden = false; return;
