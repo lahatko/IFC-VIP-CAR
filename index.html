@@ -78,6 +78,25 @@ span.ph{color:var(--muted)}
 .lock h2{margin:0;font-size:18px}
 footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:8px}
 .link{background:none;border:0;color:var(--muted);font:500 13px var(--f-ui);text-decoration:underline;cursor:pointer;padding:4px 0}
+/* 식단 */
+.menu{display:flex;flex-direction:column;gap:10px;margin-top:18px;padding-top:16px;border-top:2px solid var(--line)}
+.menu-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.menu-h h2{font-size:17px;margin:0}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.tab{font:700 14px var(--f-ui);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:10px;padding:6px 0;min-width:44px;flex:1;cursor:pointer;display:flex;flex-direction:column;align-items:center;line-height:1.25}
+.tab small{font-weight:400;font-size:11px;color:var(--muted)}
+.tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.tab[aria-selected="true"] small{color:var(--accent-fg)}
+.meals{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.meal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.meal.now{border:2px solid var(--accent)}
+.meal h3{margin:0;font-size:13px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+.meal h3 b{color:var(--accent);font-size:12px}
+.meal .main{font-weight:700;font-size:16px;line-height:1.35}
+.meal ul{margin:0;padding:0;list-style:none;font-size:13.5px;color:var(--muted)}
+.meal.closed .main{color:var(--muted);font-weight:500}
+.menu details summary{cursor:pointer;color:var(--accent);font-weight:500;font-size:14px;padding:4px 0}
+.menu details img{width:100%;border-radius:8px;border:1px solid var(--line);margin-top:6px;background:#fff}
 </style>
 </head>
 <body>
@@ -124,6 +143,16 @@ footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-
       <button class="link" type="button" id="logout">비밀번호 다시 입력</button>
     </footer>
   </div>
+
+  <!-- 식단 -->
+  <section class="menu" id="menuBox" hidden>
+    <div class="menu-h"><h2 id="menuTitle">오늘의 식단</h2><span class="meta" id="menuWeek"></span></div>
+    <p class="warn" id="menuOld" hidden></p>
+    <div class="tabs" id="menuTabs" role="tablist"></div>
+    <div class="meals" id="menuDay"></div>
+    <p class="hint" id="menuHours"></p>
+    <details id="menuFull"><summary>주간 식단표 전체 보기</summary><a id="menuImgLink" href="menu.png" target="_blank" rel="noopener"><img id="menuImg" alt="IFC 카페테리아 주간식단표" loading="lazy"></a></details>
+  </section>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
@@ -415,6 +444,41 @@ async function loop(L){
   L.busy = false;
   if (scanning) setTimeout(() => loop(L), 30);
 }
+
+/* ---------- 식단 ---------- */
+const MEAL_END = {아침:'08:30', 점심:'14:00', 저녁:'18:30', 야식:'24:30'};
+const ymd = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+let MENU = null, menuSel = 0;
+async function loadMenu(){
+  try { const r = await fetch('menu.json?t=' + Date.now(), {cache:'no-store'}); if (!r.ok) return; MENU = await r.json(); } catch(e) { return; }
+  if (!MENU.days || !MENU.days.length) return;
+  const today = ymd(new Date());
+  let i = MENU.days.findIndex(d => d.date === today);
+  const old = i < 0 && today > MENU.days[MENU.days.length - 1].date;
+  if (i < 0) i = old ? MENU.days.length - 1 : 0;
+  menuSel = i;
+  $('menuWeek').textContent = MENU.week + ' 식단';
+  $('menuOld').textContent = '이번 주 식단표가 아직 오지 않아 지난 식단표를 보여드립니다.'; $('menuOld').hidden = !old;
+  $('menuHours').textContent = MENU.hours ? '운영시간 · ' + MENU.hours : '';
+  $('menuImg').src = 'menu.png?v=' + encodeURIComponent(MENU.updated || ''); $('menuImgLink').href = $('menuImg').src;
+  $('menuTabs').innerHTML = MENU.days.map((d, k) => `<button class="tab" role="tab" type="button" data-k="${k}" aria-selected="${k === i}">${esc(d.dow)}<small>${esc(d.date.slice(8))}${d.date === today ? ' 오늘' : ''}</small></button>`).join('');
+  $('menuBox').hidden = false;
+  drawMenu();
+}
+$('menuTabs').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; menuSel = +b.dataset.k;
+  [...$('menuTabs').children].forEach(t => t.setAttribute('aria-selected', t === b)); drawMenu(); });
+function drawMenu(){
+  const d = MENU.days[menuSel], isToday = d.date === ymd(new Date());
+  const now = new Date(), hm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  const order = ['아침','점심','저녁','야식'].filter(k => d.meals[k]);
+  const cur = isToday ? (order.find(k => hm <= MEAL_END[k] && !(d.meals[k].closed)) || null) : null;
+  $('menuTitle').textContent = isToday ? '오늘의 식단' : `${d.dow}요일 식단`;
+  $('menuDay').innerHTML = order.map(k => { const m = d.meals[k];
+    const main = m.closed ? '미운영' : (m.main.join(' / ') || '-');
+    return `<div class="meal${k === cur ? ' now' : ''}${m.closed ? ' closed' : ''}"><h3>${k}${k === cur ? '<b>지금·다음</b>' : ''}</h3>
+      <div class="main">${esc(main)}</div>${m.closed ? '' : `<ul>${m.sides.map(x => `<li>${esc(x)}</li>`).join('')}</ul>`}</div>`; }).join('');
+}
+loadMenu();
 
 boot();
 </script>
