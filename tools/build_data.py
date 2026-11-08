@@ -155,7 +155,7 @@ def parse(pass_path, season_path=None):
         for r in lst:
             flag(r, f'관리번호 {no}번을 다른 차량과 같이 씀')
         WARN.append([', '.join(plates), msg])
-    for r in PASS + SEASON:
+    for r in PASS:
         if not re.fullmatch(r'[가-힣]{0,2}\d{2,3}[가-힣]\d{4}', norm(r['p'])):
             flag(r, '번호판 형식 확인 필요')
             WARN.append([r['p'], f"번호판 형식이 이상함: '{r['p']}' ({r['c']})"])

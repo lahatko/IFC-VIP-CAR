@@ -45,9 +45,9 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
   </section>
 
   <section class="step">
-    <h2><span>2</span>지하 정기권 엑셀 <span style="color:var(--muted);font-weight:400">(있을 때만)</span></h2>
-    <p class="hint">'차량번호' 열이 있는 시트를 모두 읽습니다. 업데이트할 때마다 두 파일을 함께 넣어주세요.</p>
-    <input type="file" id="fSeason" accept=".xlsx,.xls">
+    <h2><span>2</span>지하 정기권 목록 <span style="color:var(--muted);font-weight:400">(주차 시스템에서 내보낸 CSV 또는 엑셀)</span></h2>
+    <p class="hint">차량번호·사용시작일시·사용종료일시·상품명·사용여부·업체명 열을 읽습니다. 비표와 따로 <b>season.enc</b>로 만들어지니, 정기권만 바뀌었으면 이 칸만 넣어도 됩니다.</p>
+    <input type="file" id="fSeason" accept=".csv,.xlsx,.xls">
   </section>
 
   <section class="step" id="preview" hidden>
@@ -57,16 +57,17 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
   </section>
 
   <section class="step">
-    <h2><span>4</span>명단 파일(data.enc) 만들기</h2>
+    <h2><span>4</span>명단 파일 만들기</h2>
     <p class="hint">사이트에 올라가 있는 열쇠(keys.json)로 잠급니다. 비밀번호는 필요 없습니다.</p>
     <p class="err" id="keyErr" hidden></p>
-    <button class="btn" id="make" disabled>data.enc 만들기</button>
+    <p class="hint">1번을 넣었으면 <b>data.enc</b>(비표), 2번을 넣었으면 <b>season.enc</b>(정기권)가 다운로드됩니다. 받은 파일을 GitHub에 올려 기존 파일을 바꾸세요.</p>
+    <button class="btn" id="make" disabled>명단 파일 만들기</button>
     <p class="ok" id="done" hidden></p>
   </section>
 
   <section class="step">
     <h2><span>⚙</span>비밀번호 설정 · 변경 <span style="color:var(--muted);font-weight:400">(처음 한 번, 또는 비밀번호를 바꿀 때만)</span></h2>
-    <p class="hint">새 열쇠 파일(keys.json)을 만듭니다. 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 하고, data.enc도 새 열쇠로 다시 만들어 함께 올려야 합니다.</p>
+    <p class="hint">새 열쇠 파일(keys.json)을 만듭니다. 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 하고, data.enc와 season.enc도 새 열쇠로 다시 만들어 함께 올려야 합니다.</p>
     <input type="password" id="pw1" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password">
     <input type="password" id="pw2" placeholder="새 비밀번호 확인" autocomplete="new-password">
     <p class="err" id="err" hidden></p>
@@ -106,6 +107,63 @@ let PASS = [], VOID = [], SEASON = [], WARN = [], SKIP = [], wbInfo = {};
 async function load(file){ const buf = await file.arrayBuffer(); return XLSX.read(buf, {cellDates:true}); }
 const plateOK = p => /^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/.test(norm(p));
 
+/* ---------- 정기권 (tools/build_season.py 와 같은 규칙) ---------- */
+const JUNK = new Set(['null', '-', '.', 'x', 'X', 'q', '0']);
+const sclean = v => { v = v == null ? '' : String(v).trim(); if (/^\d+\.0$/.test(v)) v = v.slice(0, -2); return JUNK.has(v) ? '' : v; };
+const pad2 = n => String(n).padStart(2, '0');
+const dts = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+const sValid = x => { const now = dts(new Date()); return x.use && (x.fr || '') <= now && now <= (x.to || ''); };
+function parseCSV(text){
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i+1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i+1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+    else f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows;
+}
+function sBuilding(company, code){
+  let m = /([123])\s*IFC/i.exec(company || ''); if (m) return m[1] + 'IFC';
+  m = /^F([123])/.exec(code || ''); return m ? m[1] + 'IFC' : '';
+}
+async function parseSeason(file){
+  let rows;
+  if (/\.csv$/i.test(file.name)) {
+    const buf = await file.arrayBuffer(); let text;
+    try { text = new TextDecoder('utf-8', {fatal:true}).decode(buf); if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1); }
+    catch(e) { text = new TextDecoder('euc-kr').decode(buf); }
+    rows = parseCSV(text);
+  } else {
+    const wb = await load(file); rows = [];
+    for (const name of wb.SheetNames) {
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:''}).map(r => r.map(c => c instanceof Date ? dts(c) : (c == null ? '' : String(c))));
+      if (rows.slice(0, 5).some(r => r.join('').includes('차량번호'))) break;
+    }
+  }
+  const hi = rows.slice(0, 5).findIndex(r => r.some(c => String(c).replace(/\s/g, '') === '차량번호'));
+  if (hi < 0) throw new Error("정기권 파일에서 '차량번호' 열을 찾지 못했습니다");
+  const H = {}; rows[hi].forEach((c, i) => { const k = String(c).replace(/\s/g, ''); if (k && !(k in H)) H[k] = i; });
+  const col = (r, ...names) => { for (const nm of names) { let i = H[nm]; if (i === undefined) { const k = Object.keys(H).find(h => h.includes(nm)); if (k !== undefined) i = H[k]; } if (i !== undefined) return i < r.length ? r[i] : ''; } return ''; };
+  const out = [], seen = new Set();
+  for (const r of rows.slice(hi + 1)) {
+    const p = sclean(col(r, '차량번호')); if (!p) continue;
+    const c = sclean(col(r, '업체명')), code = sclean(col(r, '업체코드'));
+    let x = {b: sBuilding(c, code), p, n: norm(p), c, prod: sclean(col(r, '상품명', '싱픔명')), pt: sclean(col(r, '상품유형')),
+      fr: sclean(col(r, '사용시작일시', '시작')), to: sclean(col(r, '사용종료일시', '종료')), use: sclean(col(r, '사용여부')) === '사용' ? 1 : 0,
+      m: sclean(col(r, '모델')) || sclean(col(r, '차종')), d: sclean(col(r, '이름')), dp: sclean(col(r, '연락처')), room: sclean(col(r, '주소')), o: sclean(col(r, '비고'))};
+    x = Object.fromEntries(Object.entries(x).filter(([k, v]) => v !== '' && !(k === 'pt' && v === '기간상품')));
+    const key = JSON.stringify(Object.keys(x).sort().map(k => [k, x[k]]));
+    if (seen.has(key)) continue; seen.add(key); out.push(x);
+  }
+  return out;
+}
+const exportedFromName = name => { const m = /(20\d{2})(\d{2})(\d{2})_(\d{2})(\d{2})/.exec(name || ''); return m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}` : ''; };
+async function gzip(bytes){ const st = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')); return new Uint8Array(await new Response(st).arrayBuffer()); }
+
 async function parseAll(){
   PASS = []; VOID = []; SEASON = []; SKIP = []; wbInfo = {used:[], ignored:[]};
   const fp = $('fPass').files[0], fs = $('fSeason').files[0];
@@ -129,17 +187,7 @@ async function parseAll(){
       }
     }
   }
-  if (fs) {
-    const wb = await load(fs);
-    for (const name of wb.SheetNames) {
-      const rows = readSheet(wb.Sheets[name]); if (!rows) continue;
-      wbInfo.used.push('정기권:' + name);
-      for (const r of rows) {
-        if (/해지|만료|분실|취소|대기/.test(r.st)) continue;
-        SEASON.push({b: bld(r.gu) || BLD[name.toUpperCase().trim()] || '', p:r.p, n:norm(r.p), c:r.c, m:r.m, d:r.d || r.ow, dp:r.dp, mg:r.mg, ext:r.ext, mp:r.mp, no:r.no, dt:r.dt, exp:r.exp, o:r.o, w:[]});
-      }
-    }
-  }
+  if (fs) { SEASON = await parseSeason(fs); wbInfo.used.push('정기권:' + fs.name); }
   // 자동 점검
   WARN = [];
   const flag = (r, msg) => { if (!r.w.includes(msg)) r.w.push(msg); };
@@ -157,7 +205,7 @@ async function parseAll(){
     const [b, no] = k.split('|'); const msg = `${b} 관리번호 ${no}번을 다른 차량과 같이 씀 (${plates.join(', ')})`;
     list.forEach(r => flag(r, `관리번호 ${no}번을 다른 차량과 같이 씀`)); WARN.push([plates.join(', '), msg]);
   }
-  [...PASS, ...SEASON].forEach(r => { if (!plateOK(r.p)) { flag(r, '번호판 형식 확인 필요'); WARN.push([r.p, `번호판 형식이 이상함: '${r.p}' (${r.c})`]); } });
+  PASS.forEach(r => { if (!plateOK(r.p)) { flag(r, '번호판 형식 확인 필요'); WARN.push([r.p, `번호판 형식이 이상함: '${r.p}' (${r.c})`]); } });
   showPreview();
 }
 
@@ -166,7 +214,7 @@ function showPreview(){
   const cnt = (list, b) => new Set(list.filter(r => !b || r.b === b).map(r => r.n)).size;
   $('summary').innerHTML = `<table><tr><th>구분</th><th>1IFC</th><th>2IFC</th><th>3IFC</th><th>합계(차량)</th></tr>
     <tr><td>드랍존 비표</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(PASS,b)}</td>`).join('')}<td class="n">${cnt(PASS)}</td></tr>
-    <tr><td>지하 정기권</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(SEASON,b)}</td>`).join('')}<td class="n">${cnt(SEASON) || '없음'}</td></tr>
+    <tr><td>지하 정기권 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(SEASON.filter(sValid),b)}</td>`).join('')}<td class="n">${SEASON.length ? cnt(SEASON.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(SEASON) + '대 · ' + SEASON.length + '건)</span>' : '없음'}</td></tr>
     <tr><td>해지·분실 기록</td><td colspan="3"></td><td class="n">${VOID.length}</td></tr></table>
     <p class="hint">읽은 시트: ${esc(wbInfo.used.join(', '))}${wbInfo.ignored.length ? ' · 건너뛴 시트: ' + esc(wbInfo.ignored.join(', ')) : ''}${SKIP.length ? '<br>제외: ' + SKIP.map(esc).join(' / ') : ''}</p>`;
   const uniqW = [...new Map(WARN.map(w => [w[1], w])).values()];
@@ -203,19 +251,25 @@ function save(name, obj){
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(obj)], {type:'application/json'}));
   a.download = name; document.body.appendChild(a); a.click(); a.remove();
 }
-async function encryptData(obj){
+async function encryptData(obj, zip){
   const raw = crypto.getRandomValues(new Uint8Array(32)), iv = crypto.getRandomValues(new Uint8Array(12));
   const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt']);
-  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, k, new TextEncoder().encode(JSON.stringify(obj)));
+  let body = new TextEncoder().encode(JSON.stringify(obj)); if (zip) body = await gzip(body);
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv}, k, body);
   const ek = await crypto.subtle.encrypt(OAEP, PUB, raw);
-  return {v:2, updated:obj.updated, ek:b64(ek), iv:b64(iv), ct:b64(ct)};
+  return zip ? {v:2, z:'gzip', updated:obj.updated, ek:b64(ek), iv:b64(iv), ct:b64(ct)} : {v:2, updated:obj.updated, ek:b64(ek), iv:b64(iv), ct:b64(ct)};
 }
 $('make').onclick = async () => {
   $('make').disabled = true;
   const now = new Date(), updated = ds(now) + ' ' + String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
-  const pack = await encryptData({updated, pass:PASS, void:VOID, season:SEASON});
-  save('data.enc', pack); window.__lastPack = pack;
-  $('done').textContent = `data.enc 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
+  const files = [];
+  if (PASS.length) { const pack = await encryptData({updated, pass:PASS, void:VOID, season:[]}); save('data.enc', pack); window.__lastPack = pack; files.push('data.enc(비표)'); }
+  if (SEASON.length) {
+    if (PASS.length) await new Promise(r => setTimeout(r, 600));   // 다운로드 두 개가 겹치지 않게
+    const sp = await encryptData({updated, exported: exportedFromName($('fSeason').files[0] && $('fSeason').files[0].name), season:SEASON}, true);
+    save('season.enc', sp); window.__lastSeason = sp; files.push('season.enc(정기권)');
+  }
+  $('done').textContent = `${files.join(', ')} 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
   $('done').hidden = false; $('make').disabled = false;
 };
 $('mkKeys').onclick = async () => {

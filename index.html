@@ -72,6 +72,7 @@ dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:1
 dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .ph{display:block;color:var(--accent);font-weight:500;text-decoration:none;font-variant-numeric:tabular-nums}
 span.ph{color:var(--muted)}
+.okc{color:var(--ok);font-weight:700}.badc{color:var(--bad);font-weight:700}
 .warn{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500}
 .section-h{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin:4px 0 -4px}
 .lock{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;margin-top:20px}
@@ -168,6 +169,11 @@ async function pwKey(pw, salt, iter, use){
   const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(salt), iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, [use]);
 }
+async function gunzip(buf){
+  if (typeof DecompressionStream === 'undefined') throw new Error('nogzip');
+  const st = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(st).arrayBuffer();
+}
 async function decrypt(pack, pw){
   let plain;
   if (pack.v === 2) {
@@ -180,11 +186,12 @@ async function decrypt(pack, pw){
   } else {
     plain = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, await pwKey(pw, pack.salt, pack.iter, 'decrypt'), b64d(pack.ct));
   }
+  if (pack.z === 'gzip') plain = await gunzip(plain);
   return JSON.parse(new TextDecoder().decode(plain));
 }
 
 let KEYS = null;
-let DB = null, PACK = null;
+let DB = null, PACK = null, SPACK = null, SEASON_META = null, seasonErr = '';
 async function boot(){
   try {
     const r = await fetch('data.enc?t=' + Date.now(), {cache:'no-store'});
@@ -195,15 +202,22 @@ async function boot(){
     $('loadErr').textContent = '명단 파일(data.enc)을 불러오지 못했습니다. 인터넷 연결을 확인하거나 관리자에게 문의하세요.';
     $('loadErr').hidden = false; return;
   }
+  try { const r = await fetch('season.enc?t=' + Date.now(), {cache:'no-store'}); if (r.ok) SPACK = await r.json(); } catch(e) {}
   const saved = store.get('ifc-pw');
-  if (saved) { try { open(await decrypt(PACK, saved)); return; } catch(e) { store.del('ifc-pw'); } }
+  if (saved) { try { await unlock(saved); return; } catch(e) { store.del('ifc-pw'); } }
   $('lock').hidden = false; $('pw').focus();
+}
+async function unlock(pw){
+  const d = await decrypt(PACK, pw);          // 비밀번호가 틀리면 여기서 실패
+  let sz = null;
+  if (SPACK) { try { sz = await decrypt(SPACK, pw); } catch(e) { seasonErr = e && e.message === 'nogzip' ? '이 브라우저가 너무 오래돼 정기권 명단을 열 수 없습니다. 브라우저를 업데이트하세요.' : '정기권 명단을 열지 못했습니다.'; } }
+  open(d, sz);
 }
 $('lock').addEventListener('submit', async e => {
   e.preventDefault();
   const pw = $('pw').value; if (!pw) return;
   $('pwBtn').disabled = true; $('pwErr').hidden = true;
-  try { const d = await decrypt(PACK, pw); store.set('ifc-pw', pw); $('lock').hidden = true; open(d); }
+  try { await unlock(pw); store.set('ifc-pw', pw); $('lock').hidden = true; }
   catch(err) { $('pwErr').textContent = '비밀번호가 맞지 않습니다. 명단이 새로 바뀌면서 비밀번호가 바뀌었을 수도 있습니다.'; $('pwErr').hidden = false; }
   $('pwBtn').disabled = false;
 });
@@ -212,25 +226,39 @@ $('logout').onclick = () => { store.del('ifc-pw'); location.reload(); };
 /* ---------- 조회 ---------- */
 const norm = s => String(s || '').replace(/[\s\-·.]/g, '').replace(/^(서울|경기|인천|부산|대구|광주|대전|울산|세종|강원|충북|충남|전북|전남|경북|경남|제주)/, '');
 const digits = s => String(s || '').replace(/\D/g, '');
+const pad2 = n => String(n).padStart(2, '0');
+const nowS = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 let PLATES = [];   // [{n, p, t4, front, pass:[], season:[], void:[]}]
 
-function open(d){
+function open(d, sz){
   DB = d;
+  const season = sz ? (sz.season || []) : (d.season || []);
+  SEASON_META = sz;
   const map = new Map();
   const add = (r, kind) => {
     const n = norm(r.n || r.p); if (!n) return;
     if (!map.has(n)) { const dd = digits(n); map.set(n, {n, p:r.p, t4:dd.slice(-4), front:digits(n.split(/[가-힣]/)[0]), pass:[], season:[], void:[]}); }
     map.get(n)[kind].push(r);
   };
-  (d.pass||[]).forEach(r => add(r,'pass')); (d.season||[]).forEach(r => add(r,'season')); (d.void||[]).forEach(r => add(r,'void'));
+  (d.pass||[]).forEach(r => add(r,'pass')); season.forEach(r => add(r,'season')); (d.void||[]).forEach(r => add(r,'void'));
   PLATES = [...map.values()];
   $('main').hidden = false;
-  $('meta').textContent = '명단 ' + (d.updated || '');
-  const np = new Set((d.pass||[]).map(r => norm(r.n))).size, ns = new Set((d.season||[]).map(r => norm(r.n))).size;
-  $('counts').textContent = `비표 ${np}대 · 정기권 ${ns ? ns + '대' : '명단 없음'}`;
+  $('meta').textContent = '비표 ' + (d.updated || '') + (sz ? ' · 정기권 ' + (sz.exported || sz.updated || '') : '');
+  const np = new Set((d.pass||[]).map(r => norm(r.n))).size;
+  const nv = PLATES.filter(x => validSeason(x).length).length;
+  $('counts').textContent = `비표 ${np}대 · 정기권 ${season.length ? '유효 ' + nv + '대' : (seasonErr || '명단 없음')}`;
+  if (seasonErr) { $('loadErr').textContent = seasonErr; $('loadErr').hidden = false; }
   render('');
   if (store.get('ifc-cam') === '1') startCam();
 }
+
+// 정기권 상태: valid(유효) / expired(만료) / future(시작 전) / off(미사용)
+const sState = r => !r.use ? 'off' : (nowS() < (r.fr || '') ? 'future' : nowS() > (r.to || '9999') ? 'expired' : 'valid');
+const S_LABEL = {valid:'유효', expired:'만료', future:'시작 전', off:'미사용'};
+const validSeason = x => x.season.filter(r => sState(r) === 'valid');
+const bestSeason = x => validSeason(x)[0] || [...x.season].sort((a, b) => (b.to || '').localeCompare(a.to || ''))[0];
+const isActive = x => x.pass.length || validSeason(x).length;
+const period = r => `${(r.fr || '').slice(0, 10)} ~ ${(r.to || '') >= '2100' ? '무기한' : (r.to || '').slice(0, 10)}`;
 
 function find(raw, ocrDigits){
   const q = norm(raw), d = digits(q), hasHan = /[가-힣]/.test(q);
@@ -255,55 +283,90 @@ function find(raw, ocrDigits){
 const telHtml = p => { p = String(p || '').trim(); if (!p) return ''; const n = p.replace(/[^\d+]/g, '');
   return n.length >= 7 ? `<a class="ph" href="tel:${esc(n)}">${esc(p)}</a>` : `<span class="ph">${esc(p)}</span>`; };
 function hl(plate, t){ if (!t) return esc(plate); const i = plate.lastIndexOf(t); return i < 0 ? esc(plate) : esc(plate.slice(0,i)) + '<mark>' + esc(t) + '</mark>' + esc(plate.slice(i+4)); }
-const isActive = x => x.pass.length || x.season.length;
+
+function passDl(r){
+  return `<dl><dt>회사</dt><dd>${esc(r.c) || '-'}</dd>
+      <dt>차종</dt><dd>${esc(r.m) || '-'}</dd>
+      <dt>기사</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>
+      <dt>담당자</dt><dd>${esc(r.mg) || '-'}${telHtml(r.mp)}${r.ext ? `<span class="ph">내선 ${esc(r.ext)}</span>` : ''}</dd>
+      <dt>관리번호</dt><dd>${esc(r.no) || '-'}${r.dt ? ' · ' + esc(r.dt) : ''}</dd>
+      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}</dl>`;
+}
+function seasonDl(x, withHead){
+  const r = bestSeason(x), st = sState(r);
+  const others = x.season.filter(o => o !== r);
+  return `${withHead ? '<p class="section-h">지하 정기권</p>' : ''}<dl>
+      <dt>정기권</dt><dd>${esc(r.prod) || '-'}${r.pt ? ' · ' + esc(r.pt) : ''}</dd>
+      <dt>기간</dt><dd>${esc(period(r))} <b class="${st === 'valid' ? 'okc' : 'badc'}">${S_LABEL[st]}</b></dd>
+      <dt>업체</dt><dd>${esc(r.c) || '-'}</dd>
+      <dt>차종</dt><dd>${esc(r.m) || '-'}</dd>
+      <dt>이름</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>
+      ${r.room ? `<dt>${/호텔/.test(r.prod || '') ? '객실' : '주소'}</dt><dd>${esc(r.room)}</dd>` : ''}
+      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}</dl>
+    ${others.length ? `<p class="hint">다른 정기권 기록 ${others.length}건: ${others.slice(0, 3).map(o => esc(o.prod) + ' ' + S_LABEL[sState(o)] + ' (' + esc(period(o)) + ')').join(' / ')}</p>` : ''}`;
+}
 
 function card(x, t){
   const tags = [];
   const bld = [...new Set(x.pass.map(r => r.b))].join('·');
   if (x.pass.length) tags.push(`<span class="tag t-ok">드랍존 비표${bld ? ' ' + esc(bld) : ''}</span>`);
-  if (x.season.length) tags.push(`<span class="tag t-ok">지하 정기권${x.season[0].b ? ' ' + esc(x.season[0].b) : ''}</span>`);
+  if (x.season.length) {
+    const r = bestSeason(x), st = sState(r);
+    tags.push(st === 'valid' ? `<span class="tag t-ok">지하 정기권${r.b ? ' ' + esc(r.b) : ''}</span>` : `<span class="tag t-bad">정기권 ${S_LABEL[st]}</span>`);
+  }
   if (!isActive(x) && x.void.length) tags.push(`<span class="tag t-bad">${esc(x.void[0].st || '해지')} 비표</span>`);
-  const r = x.pass[0] || x.season[0] || x.void[0];
-  const warns = [...new Set([...x.pass, ...x.season].flatMap(r => r.w || []))];
+  const warns = [...new Set(x.pass.flatMap(r => r.w || []))];
   const extra = x.pass.length > 1 ? x.pass.slice(1).map(o => `<div class="warn">같은 차량 다른 등록: ${esc(o.b)} ${esc(o.c)} (관리번호 ${esc(o.no)})</div>`).join('') : '';
+  let body = '';
+  if (x.pass.length) body += passDl(x.pass[0]);
+  if (x.season.length) body += seasonDl(x, !!x.pass.length);
+  if (!x.pass.length && !x.season.length && x.void.length) body += passDl(x.void[0]);
   return `<div class="card">
     <div class="top"><span class="plate">${hl(x.p, t)}</span>${tags.join('')}</div>
-    <dl><dt>회사</dt><dd>${esc(r.c) || '-'}</dd>
-      <dt>차종</dt><dd>${esc(r.m) || '-'}</dd>
-      <dt>기사</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>
-      <dt>담당자</dt><dd>${esc(r.mg) || '-'}${telHtml(r.mp)}${r.ext ? `<span class="ph">내선 ${esc(r.ext)}</span>` : ''}</dd>
-      ${x.season[0] && x.season[0].exp ? `<dt>정기권 만료</dt><dd>${esc(x.season[0].exp)}</dd>` : ''}
-      <dt>관리번호</dt><dd>${esc(r.no) || '-'}${r.dt ? ' · ' + esc(r.dt) : ''}</dd>
-      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}</dl>
+    ${body}
     ${warns.map(w => `<div class="warn">확인 필요: ${esc(w)}</div>`).join('')}${extra}</div>`;
 }
 const vd = (cls, lbl, big, sub) => `<div class="verdict ${cls}" role="status"><span class="lbl">${lbl}</span><span class="big">${big}</span>${sub ? `<span class="sub">${sub}</span>` : ''}</div>`;
 function kindLabel(x){
-  if (x.pass.length && x.season.length) return '정기권 + 드랍존 비표';
-  if (x.season.length) return '지하 정기권';
-  return '드랍존 비표';
+  const sv = validSeason(x)[0], pb = x.pass[0] && x.pass[0].b, sb = sv && sv.b;
+  if (x.pass.length && sv) return '정기권 + 드랍존 비표' + (pb || sb ? ' · ' + esc(pb || sb) : '');
+  if (sv) return '지하 정기권' + (sb ? ' · ' + esc(sb) : '');
+  return '드랍존 비표' + (pb ? ' · ' + esc(pb) : '');
 }
 
 function render(raw, ocrDigits){
   const res = find(raw, ocrDigits);
   if (!res) { $('out').innerHTML = ''; return null; }
   if (res.mode === 'short') { $('out').innerHTML = `<p class="hint">숫자 4자리를 입력하세요.</p>`; return null; }
-  const active = res.list.filter(isActive), dead = res.list.filter(x => !isActive(x));
-  let v;
+  let active = res.list.filter(isActive), dead = res.list.filter(x => !isActive(x));
+  const hasSeason = PLATES.some(x => x.season.length);
+  let v, more = '';
   if (res.mode === 'company') {
     v = active.length ? vd('v-ok', '회사명 검색', `${active.length}대 등록`, '') : vd('v-none', '회사명 검색', '등록된 차량 없음', '');
+    if (active.length > 30) { more = `<p class="hint">앞의 30대만 보여드립니다. 차량번호로 조회하면 정확합니다.</p>`; active = active.slice(0, 30); }
+    dead = [];
   } else if (active.length === 1) {
-    const x = active[0], w = [...x.pass, ...x.season].some(r => (r.w||[]).length) || x.pass.length > 1;
-    v = vd(w ? 'v-warn' : 'v-ok', kindLabel(x), '등록 차량', esc((x.pass[0]||x.season[0]).c) + (w ? ' · 명단 확인 필요' : '') + (res.mode === 'full' && x.n !== norm(raw) ? ' · 한글은 직접 확인' : ''));
+    const x = active[0], w = x.pass.some(r => (r.w||[]).length) || x.pass.length > 1;
+    const sv = validSeason(x)[0], who = (x.pass[0] || sv).c;
+    const sub = [esc(who), sv ? esc(sv.prod) + ' ~' + ((sv.to || '') >= '2100' ? '무기한' : esc((sv.to || '').slice(5, 10))) : '', w ? '명단 확인 필요' : '', res.mode === 'full' && x.n !== norm(raw) ? '한글은 직접 확인' : ''].filter(Boolean).join(' · ');
+    v = vd(w ? 'v-warn' : 'v-ok', kindLabel(x), '등록 차량', sub);
   } else if (active.length > 1) {
     v = vd('v-warn', `뒤 4자리 ${esc(res.t)}`, `${active.length}대 일치`, '앞자리를 보고 해당 차량을 확인하세요');
   } else if (dead.length) {
-    v = vd('v-bad', '사용 불가', `${esc(dead[0].void[0].st || '해지')} 처리된 비표`, '등록 명단에는 없고 해지·분실 기록만 있습니다');
+    const x = dead[0];
+    if (x.season.length) {
+      const r = bestSeason(x), st = sState(r);
+      const big = {expired:'정기권 만료', off:'정기권 미사용', future:'정기권 시작 전'}[st];
+      const sub = st === 'expired' ? `${esc((r.to || '').slice(0, 10))} 만료 · ${esc(r.c || r.prod)}` : st === 'future' ? `${esc((r.fr || '').slice(0, 16))}부터 사용 · ${esc(r.c || r.prod)}` : `주차 시스템에서 '미사용'으로 바뀐 정기권 · ${esc(r.c || r.prod)}`;
+      v = vd('v-bad', '사용 불가', big, sub + (dead.length > 1 ? ` (외 ${dead.length - 1}대)` : ''));
+    } else {
+      v = vd('v-bad', '사용 불가', `${esc(x.void[0].st || '해지')} 처리된 비표`, '등록 명단에는 없고 해지·분실 기록만 있습니다');
+    }
   } else {
-    v = vd('v-bad', `뒤 4자리 ${esc(res.t)}`, '미등록 차량', (DB.season||[]).length ? '비표·정기권 명단에 없습니다' : '비표 명단에 없습니다 · 정기권 명단은 아직 없음');
+    v = vd('v-bad', `뒤 4자리 ${esc(res.t)}`, '미등록 차량', hasSeason ? '비표·정기권 명단에 없습니다' : '비표 명단에 없습니다 · 정기권 명단은 아직 없음');
   }
   const t = res.t;
-  $('out').innerHTML = `<div class="cards">${v}${active.map(x => card(x, t)).join('')}${dead.length ? '<p class="section-h">해지·분실 기록</p>' + dead.map(x => card(x, t)).join('') : ''}</div>`;
+  $('out').innerHTML = `<div class="cards">${v}${active.map(x => card(x, t)).join('')}${more}${dead.length ? '<p class="section-h">만료·해지 기록</p>' + dead.map(x => card(x, t)).join('') : ''}</div>`;
   return active.length ? 'ok' : 'none';
 }
 $('q').addEventListener('input', e => render(e.target.value));
