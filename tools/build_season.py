@@ -6,7 +6,7 @@ admin.html 의 정기권 처리와 같은 규칙입니다. 사이트의 keys.jso
 
 사용법:
   일반 정기권:            python3 tools/build_season.py --file export_....csv --keys keys.json --out season.enc
-  지하4층 로딩독 정기권:  python3 tools/build_season.py --file export_....csv --zone B4 --keys keys.json --out dock.enc
+  지하4층 로딩덕 정기권:  python3 tools/build_season.py --file export_....csv --zone B4 --keys keys.json --out dock.enc
 """
 import argparse, base64, csv, datetime, gzip, io, json, os, re
 
@@ -116,7 +116,7 @@ def main():
     ap.add_argument('--keys', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--exported', default='', help='목록을 내보낸 시각 (없으면 파일명 export_YYYYMMDD_HHMMSS 에서 읽음)')
-    ap.add_argument('--zone', default='', help="구역 표시 (지하4층 로딩독 = B4)")
+    ap.add_argument('--zone', default='', help="구역 표시 (지하4층 로딩덕 = B4)")
     ap.add_argument('--dump-json')
     a = ap.parse_args()
     season = parse(a.file, a.zone)

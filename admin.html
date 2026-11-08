@@ -51,8 +51,8 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
   </section>
 
   <section class="step">
-    <h2><span>2-1</span>지하4층 로딩독 정기권 목록 <span style="color:var(--muted);font-weight:400">(있을 때만)</span></h2>
-    <p class="hint">주차 시스템에서 로딩독 정기권만 내보낸 CSV입니다. <b>dock.enc</b>로 따로 만들어지고, 조회 화면에 "지하4층 로딩독"으로 표시됩니다.</p>
+    <h2><span>2-1</span>지하4층 로딩덕 정기권 목록 <span style="color:var(--muted);font-weight:400">(있을 때만)</span></h2>
+    <p class="hint">주차 시스템에서 로딩덕 정기권만 내보낸 CSV입니다. <b>dock.enc</b>로 따로 만들어지고, 조회 화면에 "지하4층 로딩덕"으로 표시됩니다.</p>
     <input type="file" id="fDock" accept=".csv,.xlsx,.xls">
   </section>
 
@@ -66,7 +66,7 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
     <h2><span>4</span>명단 파일 만들기</h2>
     <p class="hint">사이트에 올라가 있는 열쇠(keys.json)로 잠급니다. 비밀번호는 필요 없습니다.</p>
     <p class="err" id="keyErr" hidden></p>
-    <p class="hint">1번을 넣었으면 <b>data.enc</b>(비표), 2번은 <b>season.enc</b>(정기권), 2-1번은 <b>dock.enc</b>(로딩독)가 다운로드됩니다. 받은 파일을 GitHub에 올려 기존 파일을 바꾸세요.</p>
+    <p class="hint">1번을 넣었으면 <b>data.enc</b>(비표), 2번은 <b>season.enc</b>(정기권), 2-1번은 <b>dock.enc</b>(로딩덕)가 다운로드됩니다. 받은 파일을 GitHub에 올려 기존 파일을 바꾸세요.</p>
     <button class="btn" id="make" disabled>명단 파일 만들기</button>
     <p class="ok" id="done" hidden></p>
   </section>
@@ -194,7 +194,7 @@ async function parseAll(){
     }
   }
   if (fs) { SEASON = await parseSeason(fs); wbInfo.used.push('정기권:' + fs.name); }
-  if (fd) { DOCK = await parseSeason(fd, 'B4'); wbInfo.used.push('로딩독:' + fd.name); }
+  if (fd) { DOCK = await parseSeason(fd, 'B4'); wbInfo.used.push('로딩덕:' + fd.name); }
   // 자동 점검
   WARN = [];
   const flag = (r, msg) => { if (!r.w.includes(msg)) r.w.push(msg); };
@@ -222,7 +222,7 @@ function showPreview(){
   $('summary').innerHTML = `<table><tr><th>구분</th><th>1IFC</th><th>2IFC</th><th>3IFC</th><th>합계(차량)</th></tr>
     <tr><td>드랍존 비표</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(PASS,b)}</td>`).join('')}<td class="n">${cnt(PASS)}</td></tr>
     <tr><td>지하 정기권 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(SEASON.filter(sValid),b)}</td>`).join('')}<td class="n">${SEASON.length ? cnt(SEASON.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(SEASON) + '대 · ' + SEASON.length + '건)</span>' : '없음'}</td></tr>
-    <tr><td>지하4층 로딩독 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(DOCK.filter(sValid),b)}</td>`).join('')}<td class="n">${DOCK.length ? cnt(DOCK.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(DOCK) + '대 · ' + DOCK.length + '건)</span>' : '없음'}</td></tr>
+    <tr><td>지하4층 로딩덕 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(DOCK.filter(sValid),b)}</td>`).join('')}<td class="n">${DOCK.length ? cnt(DOCK.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(DOCK) + '대 · ' + DOCK.length + '건)</span>' : '없음'}</td></tr>
     <tr><td>해지·분실 기록</td><td colspan="3"></td><td class="n">${VOID.length}</td></tr></table>
     <p class="hint">읽은 시트: ${esc(wbInfo.used.join(', '))}${wbInfo.ignored.length ? ' · 건너뛴 시트: ' + esc(wbInfo.ignored.join(', ')) : ''}${SKIP.length ? '<br>제외: ' + SKIP.map(esc).join(' / ') : ''}</p>`;
   const uniqW = [...new Map(WARN.map(w => [w[1], w])).values()];
@@ -280,7 +280,7 @@ $('make').onclick = async () => {
   if (DOCK.length) {
     if (files.length) await new Promise(r => setTimeout(r, 600));
     const dp = await encryptData({updated, exported: exportedFromName($('fDock').files[0] && $('fDock').files[0].name), zone:'B4', season:DOCK}, true);
-    save('dock.enc', dp); window.__lastDock = dp; files.push('dock.enc(로딩독)');
+    save('dock.enc', dp); window.__lastDock = dp; files.push('dock.enc(로딩덕)');
   }
   $('done').textContent = `${files.join(', ')} 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
   $('done').hidden = false; $('make').disabled = false;
