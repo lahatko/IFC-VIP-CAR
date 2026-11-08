@@ -73,6 +73,15 @@ dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
 .ph{display:block;color:var(--accent);font-weight:500;text-decoration:none;font-variant-numeric:tabular-nums}
 span.ph{color:var(--muted)}
 .okc{color:var(--ok);font-weight:700}.badc{color:var(--bad);font-weight:700}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.st{border-radius:10px;padding:9px 6px;text-align:center;display:flex;flex-direction:column;gap:1px;border:2px solid transparent;min-width:0}
+.st .k{font-size:11.5px;font-weight:700;opacity:.9}
+.st .s{font-size:18px;font-weight:700;line-height:1.3}
+.st .d{font-size:11.5px;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.st.ok{background:var(--ok-bg);color:var(--ok);border-color:var(--ok)}
+.st.bad{background:var(--bad-bg);color:var(--bad);border-color:var(--bad)}
+.st.none{background:var(--none-bg);color:var(--muted);border-color:var(--line)}
+.grid-plate{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .warn{background:var(--warn-bg);color:var(--warn);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:500}
 .section-h{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.06em;margin:4px 0 -4px}
 .lock{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;margin-top:20px}
@@ -231,6 +240,7 @@ const digits = s => String(s || '').replace(/\D/g, '');
 const pad2 = n => String(n).padStart(2, '0');
 const nowS = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
 let PLATES = [];   // [{n, p, t4, front, pass:[], season:[], void:[]}]
+let LOADED = {main:false, B4:false};
 
 function open(d, sz, dz){
   DB = d;
@@ -243,6 +253,7 @@ function open(d, sz, dz){
   };
   (d.pass||[]).forEach(r => add(r,'pass')); season.forEach(r => add(r,'season')); (d.void||[]).forEach(r => add(r,'void'));
   PLATES = [...map.values()];
+  LOADED = {main: !!(sz || (d.season || []).length), B4: !!dz};
   $('main').hidden = false;
   $('meta').textContent = '비표 ' + (d.updated || '').slice(5) + (sz ? ' · 정기권 ' + (sz.exported || sz.updated || '').slice(5) : '') + (dz ? ' · 로딩덕 ' + (dz.exported || dz.updated || '').slice(5) : '');
   const np = new Set((d.pass||[]).map(r => norm(r.n))).size;
@@ -311,7 +322,28 @@ function seasonDl(x, z, withHead){
     ${others.length ? `<p class="hint">다른 정기권 기록 ${others.length}건: ${others.slice(0, 3).map(o => esc(o.prod) + ' ' + S_LABEL[sState(o)] + ' (' + esc(period(o)) + ')').join(' / ')}</p>` : ''}`;
 }
 
-function card(x, t){
+// 맨 위 세 칸: 드랍존 비표 / 지하 정기권 / 지하4층 로딩덕
+const md = v => (v || '') >= '2100' ? '무기한' : (v || '').slice(5, 10);
+function cell(cls, k, sym, d){ return `<div class="st ${cls}"><span class="k">${k}</span><span class="s">${sym}</span><span class="d">${d || '&nbsp;'}</span></div>`; }
+function grid(x){
+  const c = [];
+  if (x && x.pass.length) c.push(cell('ok', '드랍존 비표', '✓ 등록', esc([...new Set(x.pass.map(r => r.b))].join('·'))));
+  else if (x && x.void.length) c.push(cell('bad', '드랍존 비표', '✕ ' + esc(x.void[0].st || '해지'), '사용 불가'));
+  else c.push(cell('none', '드랍존 비표', '— 없음', ''));
+  for (const z of ['main', 'B4']) {
+    const k = z === 'B4' ? '지하4층 로딩덕' : '지하 정기권';
+    const recs = x ? inZone(x, z) : [];
+    if (!recs.length) { c.push(cell('none', k, LOADED[z] ? '— 없음' : '명단 없음', '')); continue; }
+    const r = bestSeason(x, z), st = sState(r);
+    if (st === 'valid') c.push(cell('ok', k, '✓ 유효', esc((r.b ? r.b + ' · ' : '') + '~' + md(r.to))));
+    else if (st === 'future') c.push(cell('bad', k, '✕ 시작 전', esc(md(r.fr)) + '부터'));
+    else if (st === 'expired') c.push(cell('bad', k, '✕ 만료', esc(md(r.to)) + ' 만료'));
+    else c.push(cell('bad', k, '✕ 미사용', ''));
+  }
+  return `<div class="grid3" role="group" aria-label="등록 현황">${c.join('')}</div>`;
+}
+
+function card(x, t, showGrid){
   const tags = [];
   const bld = [...new Set(x.pass.map(r => r.b))].join('·');
   if (x.pass.length) tags.push(`<span class="tag t-ok">드랍존 비표${bld ? ' ' + esc(bld) : ''}</span>`);
@@ -328,7 +360,7 @@ function card(x, t){
   for (const z of zs) body += seasonDl(x, z, !!x.pass.length || zs.length > 1 || z === 'B4');
   if (!x.pass.length && !x.season.length && x.void.length) body += passDl(x.void[0]);
   return `<div class="card">
-    <div class="top"><span class="plate">${hl(x.p, t)}</span>${tags.join('')}</div>
+    ${showGrid ? `<div class="top"><span class="plate">${hl(x.p, t)}</span></div>${grid(x)}` : ''}
     ${body}
     ${warns.map(w => `<div class="warn">확인 필요: ${esc(w)}</div>`).join('')}${extra}</div>`;
 }
@@ -374,7 +406,10 @@ function render(raw, ocrDigits){
     v = vd('v-bad', `뒤 4자리 ${esc(res.t)}`, '미등록 차량', hasSeason ? '비표·정기권 명단에 없습니다' : '비표 명단에 없습니다 · 정기권 명단은 아직 없음');
   }
   const t = res.t;
-  $('out').innerHTML = `<div class="cards">${v}${active.map(x => card(x, t)).join('')}${more}${dead.length ? '<p class="section-h">만료·해지 기록</p>' + dead.map(x => card(x, t)).join('') : ''}</div>`;
+  // 차량이 하나(또는 없음)로 정해지면 맨 위에 세 칸, 여러 대면 카드마다 세 칸
+  const single = res.mode !== 'company' && res.list.length <= 1;
+  const top = single ? `${res.list[0] ? `<div class="grid-plate"><span class="plate">${hl(res.list[0].p, t)}</span></div>` : ''}${grid(res.list[0] || null)}` : '';
+  $('out').innerHTML = `<div class="cards">${top}${v}${active.map(x => card(x, t, !single)).join('')}${more}${dead.length ? '<p class="section-h">만료·해지 기록</p>' + dead.map(x => card(x, t, !single)).join('') : ''}</div>`;
   return active.length ? 'ok' : 'none';
 }
 $('q').addEventListener('input', e => render(e.target.value));
