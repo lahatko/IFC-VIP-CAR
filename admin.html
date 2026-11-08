@@ -50,6 +50,12 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
     <input type="file" id="fSeason" accept=".csv,.xlsx,.xls">
   </section>
 
+  <section class="step">
+    <h2><span>2-1</span>지하4층 로딩독 정기권 목록 <span style="color:var(--muted);font-weight:400">(있을 때만)</span></h2>
+    <p class="hint">주차 시스템에서 로딩독 정기권만 내보낸 CSV입니다. <b>dock.enc</b>로 따로 만들어지고, 조회 화면에 "지하4층 로딩독"으로 표시됩니다.</p>
+    <input type="file" id="fDock" accept=".csv,.xlsx,.xls">
+  </section>
+
   <section class="step" id="preview" hidden>
     <h2><span>3</span>읽은 내용 확인</h2>
     <div id="summary"></div>
@@ -60,14 +66,14 @@ td.n{font-variant-numeric:tabular-nums;text-align:right}
     <h2><span>4</span>명단 파일 만들기</h2>
     <p class="hint">사이트에 올라가 있는 열쇠(keys.json)로 잠급니다. 비밀번호는 필요 없습니다.</p>
     <p class="err" id="keyErr" hidden></p>
-    <p class="hint">1번을 넣었으면 <b>data.enc</b>(비표), 2번을 넣었으면 <b>season.enc</b>(정기권)가 다운로드됩니다. 받은 파일을 GitHub에 올려 기존 파일을 바꾸세요.</p>
+    <p class="hint">1번을 넣었으면 <b>data.enc</b>(비표), 2번은 <b>season.enc</b>(정기권), 2-1번은 <b>dock.enc</b>(로딩독)가 다운로드됩니다. 받은 파일을 GitHub에 올려 기존 파일을 바꾸세요.</p>
     <button class="btn" id="make" disabled>명단 파일 만들기</button>
     <p class="ok" id="done" hidden></p>
   </section>
 
   <section class="step">
     <h2><span>⚙</span>비밀번호 설정 · 변경 <span style="color:var(--muted);font-weight:400">(처음 한 번, 또는 비밀번호를 바꿀 때만)</span></h2>
-    <p class="hint">새 열쇠 파일(keys.json)을 만듭니다. 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 하고, data.enc와 season.enc도 새 열쇠로 다시 만들어 함께 올려야 합니다.</p>
+    <p class="hint">새 열쇠 파일(keys.json)을 만듭니다. 바꾸면 모든 직원이 새 비밀번호를 다시 입력해야 하고, data.enc · season.enc · dock.enc도 새 열쇠로 다시 만들어 함께 올려야 합니다.</p>
     <input type="password" id="pw1" placeholder="새 비밀번호 (8자 이상)" autocomplete="new-password">
     <input type="password" id="pw2" placeholder="새 비밀번호 확인" autocomplete="new-password">
     <p class="err" id="err" hidden></p>
@@ -103,7 +109,7 @@ function readSheet(ws){
   })).filter(x => x.p);
 }
 
-let PASS = [], VOID = [], SEASON = [], WARN = [], SKIP = [], wbInfo = {};
+let PASS = [], VOID = [], SEASON = [], DOCK = [], WARN = [], SKIP = [], wbInfo = {};
 async function load(file){ const buf = await file.arrayBuffer(); return XLSX.read(buf, {cellDates:true}); }
 const plateOK = p => /^[가-힣]{0,2}\d{2,3}[가-힣]\d{4}$/.test(norm(p));
 
@@ -130,7 +136,7 @@ function sBuilding(company, code){
   let m = /([123])\s*IFC/i.exec(company || ''); if (m) return m[1] + 'IFC';
   m = /^F([123])/.exec(code || ''); return m ? m[1] + 'IFC' : '';
 }
-async function parseSeason(file){
+async function parseSeason(file, zone = ''){
   let rows;
   if (/\.csv$/i.test(file.name)) {
     const buf = await file.arrayBuffer(); let text;
@@ -154,7 +160,7 @@ async function parseSeason(file){
     const c = sclean(col(r, '업체명')), code = sclean(col(r, '업체코드'));
     let x = {b: sBuilding(c, code), p, n: norm(p), c, prod: sclean(col(r, '상품명', '싱픔명')), pt: sclean(col(r, '상품유형')),
       fr: sclean(col(r, '사용시작일시', '시작')), to: sclean(col(r, '사용종료일시', '종료')), use: sclean(col(r, '사용여부')) === '사용' ? 1 : 0,
-      m: sclean(col(r, '모델')) || sclean(col(r, '차종')), d: sclean(col(r, '이름')), dp: sclean(col(r, '연락처')), room: sclean(col(r, '주소')), o: sclean(col(r, '비고'))};
+      m: sclean(col(r, '모델')) || sclean(col(r, '차종')), d: sclean(col(r, '이름')), dp: sclean(col(r, '연락처')), room: sclean(col(r, '주소')), o: sclean(col(r, '비고')), zone};
     x = Object.fromEntries(Object.entries(x).filter(([k, v]) => v !== '' && !(k === 'pt' && v === '기간상품')));
     const key = JSON.stringify(Object.keys(x).sort().map(k => [k, x[k]]));
     if (seen.has(key)) continue; seen.add(key); out.push(x);
@@ -165,8 +171,8 @@ const exportedFromName = name => { const m = /(20\d{2})(\d{2})(\d{2})_(\d{2})(\d
 async function gzip(bytes){ const st = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')); return new Uint8Array(await new Response(st).arrayBuffer()); }
 
 async function parseAll(){
-  PASS = []; VOID = []; SEASON = []; SKIP = []; wbInfo = {used:[], ignored:[]};
-  const fp = $('fPass').files[0], fs = $('fSeason').files[0];
+  PASS = []; VOID = []; SEASON = []; DOCK = []; SKIP = []; wbInfo = {used:[], ignored:[]};
+  const fp = $('fPass').files[0], fs = $('fSeason').files[0], fd = $('fDock').files[0];
   if (fp) {
     const wb = await load(fp);
     for (const name of wb.SheetNames) {
@@ -188,6 +194,7 @@ async function parseAll(){
     }
   }
   if (fs) { SEASON = await parseSeason(fs); wbInfo.used.push('정기권:' + fs.name); }
+  if (fd) { DOCK = await parseSeason(fd, 'B4'); wbInfo.used.push('로딩독:' + fd.name); }
   // 자동 점검
   WARN = [];
   const flag = (r, msg) => { if (!r.w.includes(msg)) r.w.push(msg); };
@@ -210,11 +217,12 @@ async function parseAll(){
 }
 
 function showPreview(){
-  $('preview').hidden = !(PASS.length || SEASON.length);
+  $('preview').hidden = !(PASS.length || SEASON.length || DOCK.length);
   const cnt = (list, b) => new Set(list.filter(r => !b || r.b === b).map(r => r.n)).size;
   $('summary').innerHTML = `<table><tr><th>구분</th><th>1IFC</th><th>2IFC</th><th>3IFC</th><th>합계(차량)</th></tr>
     <tr><td>드랍존 비표</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(PASS,b)}</td>`).join('')}<td class="n">${cnt(PASS)}</td></tr>
     <tr><td>지하 정기권 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(SEASON.filter(sValid),b)}</td>`).join('')}<td class="n">${SEASON.length ? cnt(SEASON.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(SEASON) + '대 · ' + SEASON.length + '건)</span>' : '없음'}</td></tr>
+    <tr><td>지하4층 로딩독 (지금 유효)</td>${['1IFC','2IFC','3IFC'].map(b => `<td class="n">${cnt(DOCK.filter(sValid),b)}</td>`).join('')}<td class="n">${DOCK.length ? cnt(DOCK.filter(sValid)) + ' <span class="hint">(전체 ' + cnt(DOCK) + '대 · ' + DOCK.length + '건)</span>' : '없음'}</td></tr>
     <tr><td>해지·분실 기록</td><td colspan="3"></td><td class="n">${VOID.length}</td></tr></table>
     <p class="hint">읽은 시트: ${esc(wbInfo.used.join(', '))}${wbInfo.ignored.length ? ' · 건너뛴 시트: ' + esc(wbInfo.ignored.join(', ')) : ''}${SKIP.length ? '<br>제외: ' + SKIP.map(esc).join(' / ') : ''}</p>`;
   const uniqW = [...new Map(WARN.map(w => [w[1], w])).values()];
@@ -235,12 +243,12 @@ function check(){
   else if (a && b && a !== b) msg = '두 비밀번호가 다릅니다.';
   $('err').textContent = msg; $('err').hidden = !msg;
   $('mkKeys').disabled = !(a.length >= 8 && a === b);
-  const has = PASS.length || SEASON.length;
+  const has = PASS.length || SEASON.length || DOCK.length;
   $('keyErr').textContent = PUB ? '' : '사이트에서 열쇠(keys.json)를 찾지 못했습니다. 아래 ⚙ 칸에서 비밀번호를 먼저 설정하세요.';
   $('keyErr').hidden = !!PUB;
   $('make').disabled = !(has && PUB);
 }
-['fPass','fSeason'].forEach(id => $(id).addEventListener('change', () => parseAll().catch(e => { $('keyErr').textContent = '엑셀을 읽지 못했습니다: ' + e.message; $('keyErr').hidden = false; })));
+['fPass','fSeason','fDock'].forEach(id => $(id).addEventListener('change', () => parseAll().catch(e => { $('keyErr').textContent = '엑셀을 읽지 못했습니다: ' + e.message; $('keyErr').hidden = false; })));
 ['pw1','pw2'].forEach(id => $(id).addEventListener('input', check));
 
 const b64 = u8 => { u8 = new Uint8Array(u8); let str = ''; for (let i = 0; i < u8.length; i += 0x8000) str += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(str); };
@@ -268,6 +276,11 @@ $('make').onclick = async () => {
     if (PASS.length) await new Promise(r => setTimeout(r, 600));   // 다운로드 두 개가 겹치지 않게
     const sp = await encryptData({updated, exported: exportedFromName($('fSeason').files[0] && $('fSeason').files[0].name), season:SEASON}, true);
     save('season.enc', sp); window.__lastSeason = sp; files.push('season.enc(정기권)');
+  }
+  if (DOCK.length) {
+    if (files.length) await new Promise(r => setTimeout(r, 600));
+    const dp = await encryptData({updated, exported: exportedFromName($('fDock').files[0] && $('fDock').files[0].name), zone:'B4', season:DOCK}, true);
+    save('dock.enc', dp); window.__lastDock = dp; files.push('dock.enc(로딩독)');
   }
   $('done').textContent = `${files.join(', ')} 파일이 다운로드되었습니다 (${updated} 기준). GitHub 저장소에 올려서 기존 파일을 바꾸세요.`;
   $('done').hidden = false; $('make').disabled = false;

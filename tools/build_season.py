@@ -5,7 +5,8 @@ admin.html 의 정기권 처리와 같은 규칙입니다. 사이트의 keys.jso
 비표 명단(data.enc)과 별도 파일이라, 매일 비표 자동 업데이트가 정기권을 지우지 않습니다.
 
 사용법:
-  python3 tools/build_season.py --file export_20261108_084314.csv --keys keys.json --out season.enc
+  일반 정기권:            python3 tools/build_season.py --file export_....csv --keys keys.json --out season.enc
+  지하4층 로딩독 정기권:  python3 tools/build_season.py --file export_....csv --zone B4 --keys keys.json --out dock.enc
 """
 import argparse, base64, csv, datetime, gzip, io, json, os, re
 
@@ -61,7 +62,7 @@ def read_rows(path):
     return H, rows[hi + 1:]
 
 
-def parse(path):
+def parse(path, zone=''):
     H, rows = read_rows(path)
 
     def col(r, *names):
@@ -84,7 +85,7 @@ def parse(path):
              'fr': clean(col(r, '사용시작일시', '시작')), 'to': clean(col(r, '사용종료일시', '종료')),
              'use': 1 if clean(col(r, '사용여부')) == '사용' else 0,
              'm': clean(col(r, '모델')) or clean(col(r, '차종')), 'd': clean(col(r, '이름')),
-             'dp': clean(col(r, '연락처')), 'room': clean(col(r, '주소')), 'o': clean(col(r, '비고'))}
+             'dp': clean(col(r, '연락처')), 'room': clean(col(r, '주소')), 'o': clean(col(r, '비고')), 'zone': zone}
         x = {k: v for k, v in x.items() if v != '' and not (k == 'pt' and v == '기간상품')}   # 빈 칸·기본값은 빼서 크기 줄임
         key = json.dumps(x, ensure_ascii=False, sort_keys=True)
         if key in seen:
@@ -115,11 +116,12 @@ def main():
     ap.add_argument('--keys', required=True)
     ap.add_argument('--out', required=True)
     ap.add_argument('--exported', default='', help='목록을 내보낸 시각 (없으면 파일명 export_YYYYMMDD_HHMMSS 에서 읽음)')
+    ap.add_argument('--zone', default='', help="구역 표시 (지하4층 로딩독 = B4)")
     ap.add_argument('--dump-json')
     a = ap.parse_args()
-    season = parse(a.file)
+    season = parse(a.file, a.zone)
     kst = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
-    obj = {'updated': kst.strftime('%Y-%m-%d %H:%M'), 'exported': a.exported or exported_from_name(a.file), 'season': season}
+    obj = {'updated': kst.strftime('%Y-%m-%d %H:%M'), 'exported': a.exported or exported_from_name(a.file), 'zone': a.zone, 'season': season}
     if a.dump_json:
         json.dump(obj, open(a.dump_json, 'w'), ensure_ascii=False)
     keys = json.load(open(a.keys))
