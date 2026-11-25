@@ -65,8 +65,12 @@ h1{font-size:18px;margin:0}
 /* 카메라 (켰을 때만 보임) */
 .cam{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:16/10;max-height:42vh;width:100%}
 .cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
-.guide{position:absolute;left:10%;width:80%;top:50%;aspect-ratio:4.4/1;transform:translateY(-50%);border:3px solid rgba(255,255,255,.95);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.38)}
-.guide.hit{border-color:#4fd18b}
+.guide{position:absolute;left:3%;width:94%;top:22%;height:56%;border-radius:10px;box-shadow:0 0 0 2000px rgba(0,0,0,.22);--c:rgba(255,255,255,.95);
+  background:linear-gradient(var(--c),var(--c)) top left/28px 4px,linear-gradient(var(--c),var(--c)) top left/4px 28px,
+    linear-gradient(var(--c),var(--c)) top right/28px 4px,linear-gradient(var(--c),var(--c)) top right/4px 28px,
+    linear-gradient(var(--c),var(--c)) bottom left/28px 4px,linear-gradient(var(--c),var(--c)) bottom left/4px 28px,
+    linear-gradient(var(--c),var(--c)) bottom right/28px 4px,linear-gradient(var(--c),var(--c)) bottom right/4px 28px;background-repeat:no-repeat}
+.guide.hit{--c:#4fd18b}
 .camstat{position:absolute;left:0;right:0;bottom:0;padding:8px 12px;color:#fff;font-size:13.5px;font-weight:500;background:linear-gradient(transparent,rgba(0,0,0,.75));display:flex;justify-content:space-between;gap:8px;align-items:flex-end}
 .readbtn{font:700 20px var(--f-ui);color:#fff;letter-spacing:.08em;font-variant-numeric:tabular-nums;cursor:pointer;padding:6px 10px;min-height:44px;border:0;border-radius:8px;background:rgba(255,255,255,.2)}.readbtn:empty{display:none}
 .camctl{position:absolute;top:8px;right:8px;display:flex;gap:6px}
@@ -203,7 +207,7 @@ body.has-dock{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
       <video id="video" playsinline muted autoplay></video>
       <div class="guide" id="guide"></div>
       <div class="camctl"><button class="pill" type="button" id="pauseBtn">일시정지</button></div>
-      <div class="camstat"><span id="camMsg">번호판을 네모 안에 맞춰주세요</span><button type="button" class="readbtn" id="camRead" aria-label="읽은 번호로 조회"></button></div>
+      <div class="camstat"><span id="camMsg">번호판을 화면 가운데쯤 비춰주세요</span><button type="button" class="readbtn" id="camRead" aria-label="읽은 번호로 조회"></button></div>
     </div>
 
     <div id="out"></div>
@@ -560,12 +564,12 @@ async function startCam(){
       for (let i = 0; i < want; i++) {
         const w = await Tesseract.createWorker('eng', 1, window.TESS_OPTS || {});
         await w.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
-        lanes.push({w, busy:false, a:newCanvas(), b:newCanvas()});
+        lanes.push({w, busy:false, a:newCanvas(), b:newCanvas(), g:newCanvas(), t:newCanvas(), r:newCanvas()});
       }
     } catch(e) { if (!lanes.length) { $('camMsg').textContent = '인식 엔진을 불러오지 못했습니다. 번호를 직접 입력하세요.'; return; } }
   }
   if (!stream) return;
-  $('camMsg').textContent = '번호판을 네모 안에 맞춰주세요';
+  $('camMsg').textContent = '번호판을 화면 가운데쯤 비춰주세요';
   $('pauseBtn').textContent = '일시정지';
   scanning = true; runAll();
 }
@@ -581,20 +585,131 @@ function runAll(){ lanes.forEach((L, i) => setTimeout(() => loop(L), i * 150)); 
 $('camStart').onclick = () => stream ? stopCam() : startCam();
 $('pauseBtn').onclick = () => {
   scanning = !scanning; $('pauseBtn').textContent = scanning ? '일시정지' : '다시 시작';
-  $('camMsg').textContent = scanning ? '번호판을 네모 안에 맞춰주세요' : '일시정지됨';
+  $('camMsg').textContent = scanning ? '번호판을 화면 가운데쯤 비춰주세요' : '일시정지됨';
   if (scanning) { lastShown = ''; reads = []; runAll(); }
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; } });
 
-// 1차: 네모 안을 잘라 흑백으로
-function grabPlate(L){
+// 카메라 화면에서 네모 칸 위치 계산
+function guideRegion(){
   const v = $('video'), box = $('cam').getBoundingClientRect(), gb = $('guide').getBoundingClientRect();
   const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return null;
   const s = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * s) / 2, oy = (box.height - vh * s) / 2;   // object-fit: cover 보정
-  const sx = (gb.left - box.left - ox) / s, sy = (gb.top - box.top - oy) / s, sw = gb.width / s, sh = gb.height / s;
-  const H = 110, W = Math.round(H * sw / sh), {c, x} = L.a;
+  return {src: v, sx: (gb.left - box.left - ox) / s, sy: (gb.top - box.top - oy) / s, sw: gb.width / s, sh: gb.height / s};
+}
+
+/* ---- 인식 (v6): 넓은 영역에서 번호판 글자줄 찾기 ----
+   1) 표시된 넓은 영역(가로 94% × 세로 56%)을 가로 800px 회색조로, 대비를 늘림
+   2) 검은 글자/흰 글자 × 전체 기준/주변 밝기 기준 4가지로 흑백을 만들고,
+      왼쪽부터 이웃한 글자(높이 비슷·세로 위치 가까움·간격 2글자 이내)를 사슬로 이어 글자줄 후보를 모음 (기울어진 번호판도 이어짐)
+   3) 크고 가운데에 가까운 줄부터 최대 3줄: 기울기를 바로 세우고 글자 높이 44px로 맞춰 읽음
+   4) 숫자가 6~8자리이고 0으로 시작하지 않을 때만 번호판으로 인정 (전화번호·스티커·기둥 번호 제외) */
+function plateRows(L, R){
+  const W = 800, H = Math.max(60, Math.round(W * R.sh / R.sw)), {c, x} = L.g;
   c.width = W; c.height = H;
-  x.drawImage(v, sx, sy, sw, sh, 0, 0, W, H);
+  x.drawImage(R.src, R.sx, R.sy, R.sw, R.sh, 0, 0, W, H);
+  const d = x.getImageData(0, 0, W, H).data, n = W * H, g = new Float32Array(n), hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; g[i] = y; hist[y]++; }
+  let acc = 0, lo = 0, hi = 255;
+  for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= n * 0.02) { lo = i; break; } }
+  acc = 0; for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= n * 0.02) { hi = i; break; } }
+  const k = 255 / Math.max(1, hi - lo); hist.fill(0);
+  for (let i = 0; i < n; i++) { let v = (g[i] - lo) * k; v = v < 0 ? 0 : v > 255 ? 255 : v; g[i] = v; hist[v | 0]++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) ** 2; if (b > best) { best = b; th = i; } }
+  const r = 21, I = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) { let row = 0; for (let xx = 0; xx < W; xx++) { row += g[y * W + xx]; I[(y + 1) * (W + 1) + xx + 1] = I[y * (W + 1) + xx + 1] + row; } }
+  const loc = new Float32Array(n);
+  for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    for (let xx = 0; xx < W; xx++) { const x0 = Math.max(0, xx - r), x1 = Math.min(W, xx + r + 1);
+      loc[y * W + xx] = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0)); } }
+  const rows = [];
+  for (let mode = 0; mode < 4; mode++) {
+    const on = new Uint8Array(n);
+    if (mode === 0) for (let i = 0; i < n; i++) on[i] = g[i] <= th ? 1 : 0;
+    else if (mode === 1) for (let i = 0; i < n; i++) on[i] = g[i] > th ? 1 : 0;
+    else if (mode === 2) for (let i = 0; i < n; i++) on[i] = g[i] < loc[i] - 12 ? 1 : 0;
+    else for (let i = 0; i < n; i++) on[i] = g[i] > loc[i] + 12 ? 1 : 0;
+    const {chains, lab} = charChains(on, W, H, 12 * W / 1000, H * 0.8);
+    for (const ch of chains) rows.push({grp: ch, lab, score: scoreRow(ch, W, H)});
+  }
+  rows.sort((a, b) => b.score - a.score);
+  return {rows, W, H};
+}
+function charChains(on, W, H, minh, maxh){
+  const lab = new Int32Array(W * H), stack = [], comps = [];
+  let id = 0;
+  for (let p = 0; p < W * H; p++) {
+    if (!on[p] || lab[p]) continue;
+    id++; let x0 = W, x1 = 0, y0 = H, y1 = 0, cnt = 0, edge = false; stack.push(p); lab[p] = id;
+    while (stack.length) {
+      const q = stack.pop(), qx = q % W, qy = (q / W) | 0; cnt++;
+      if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+      if (qx === 0 || qy === 0 || qx === W - 1 || qy === H - 1) edge = true;
+      if (qx > 0 && on[q-1] && !lab[q-1]) { lab[q-1] = id; stack.push(q-1); }
+      if (qx < W-1 && on[q+1] && !lab[q+1]) { lab[q+1] = id; stack.push(q+1); }
+      if (qy > 0 && on[q-W] && !lab[q-W]) { lab[q-W] = id; stack.push(q-W); }
+      if (qy < H-1 && on[q+W] && !lab[q+W]) { lab[q+W] = id; stack.push(q+W); }
+    }
+    const h = y1 - y0 + 1, w = x1 - x0 + 1, fill = cnt / (h * w);
+    if (edge || h < minh || h > maxh || w > h * 1.6 || w < 2 || fill < 0.12 || fill > 0.92) continue;
+    comps.push({i: id, x0, x1: x1 + 1, y0, y1: y1 + 1, h, cy: (y0 + y1 + 1) / 2, cx: (x0 + x1 + 1) / 2});
+  }
+  comps.sort((a, b) => a.x0 - b.x0);
+  const chains = [];
+  for (const c of comps) {
+    let bestC = null;
+    for (const ch of chains) {
+      const l = ch[ch.length - 1], hm = (l.h + c.h) / 2, gap = c.x0 - l.x1;
+      if (Math.abs(l.h - c.h) <= Math.max(l.h, c.h) * 0.3 && Math.abs(l.cy - c.cy) <= hm * 0.4 && gap >= -hm * 0.3 && gap <= hm * 2.0)
+        if (!bestC || ch.length > bestC.length) bestC = ch;
+    }
+    if (bestC) bestC.push(c); else chains.push([c]);
+  }
+  return {chains: chains.filter(ch => ch.length >= 4), lab};
+}
+function median(a){ const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+function scoreRow(row, W, H){   // 크고(가까이) 가운데에 있고 글자 수가 번호판다운 줄을 먼저
+  const hm = median(row.map(c => c.h)), cx = row.reduce((a, c) => a + c.cx, 0) / row.length / W, cy = row.reduce((a, c) => a + c.cy, 0) / row.length / H;
+  return hm / H * 40 - (Math.abs(cx - 0.5) + Math.abs(cy - 0.5)) * 8 + (row.length >= 6 && row.length <= 10 ? 4 : 0);
+}
+function renderRow2(L, row, W, target, pad){
+  const {grp, lab} = row, ids = new Set(grp.map(c => c.i)), m = 6;
+  // 기울기: 글자 중심의 직선 맞춤
+  const xs = grp.map(c => c.cx), ys = grp.map(c => c.cy), mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0, sxx = 0; for (let i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
+  const ang = sxx > 0 ? Math.atan(sxy / sxx) : 0;
+  const H = lab.length / W;
+  const X0 = Math.max(0, Math.min(...grp.map(c => c.x0)) - m), X1 = Math.min(W, Math.max(...grp.map(c => c.x1)) + m);
+  const Y0 = Math.max(0, Math.min(...grp.map(c => c.y0)) - m), Y1 = Math.min(H, Math.max(...grp.map(c => c.y1)) + m);
+  const cw = X1 - X0, ch = Y1 - Y0, {c: t, x: tx} = L.t; t.width = cw; t.height = ch;
+  const im = tx.createImageData(cw, ch), dd = im.data;
+  for (let y = 0; y < ch; y++) for (let xx = 0; xx < cw; xx++) {
+    const o = (y * cw + xx) * 4, v = ids.has(lab[(y + Y0) * W + xx + X0]) ? 0 : 255; dd[o] = dd[o+1] = dd[o+2] = v; dd[o+3] = 255; }
+  tx.putImageData(im, 0, 0);
+  const rot = Math.abs(ang) > Math.PI / 180 ? ang : 0, cs = Math.abs(Math.cos(rot)), sn = Math.abs(Math.sin(rot));
+  const k = target / Math.max(1, median(grp.map(c => c.h)) * Math.cos(ang));
+  const rw = (cw * cs + ch * sn) * k, rh = (cw * sn + ch * cs) * k, {c, x} = L.r;
+  c.width = Math.round(rw) + 2 * pad; c.height = Math.round(rh) + 2 * pad;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.imageSmoothingEnabled = true;
+  x.translate(c.width / 2, c.height / 2); x.rotate(-rot); x.scale(k, k); x.drawImage(t, -cw / 2, -ch / 2); x.setTransform(1, 0, 0, 1, 0, 0);
+  const o = x.getImageData(0, 0, c.width, c.height), od = o.data;
+  for (let i = 0; i < od.length; i += 4) { const v = od[i] < 128 ? 0 : 255; od[i] = od[i+1] = od[i+2] = v; od[i+3] = 255; }
+  x.putImageData(o, 0, 0);
+  return c;
+}
+function plateLike(r){   // 번호판다운 숫자만: 전체 6~8자리, 0으로 시작하지 않음
+  if (!r) return null; const all = r.lead + r.t4;
+  return all.length >= 6 && all.length <= 8 && all[0] !== '0' ? r : null;
+}
+
+// 예비: 이전 방식 (네모 칸 전체를 흑백으로)
+function grabPlate(L, R){
+  const H = 110, W = Math.round(H * R.sw / R.sh), {c, x} = L.a;
+  c.width = W; c.height = H;
+  x.drawImage(R.src, R.sx, R.sy, R.sw, R.sh, 0, 0, W, H);
   const img = x.getImageData(0, 0, W, H), d = img.data, n = W * H, gray = new Uint8Array(n), hist = new Array(256).fill(0);
   for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; gray[i] = y; hist[y]++; }
   let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
@@ -660,21 +775,35 @@ function handleRead(r){
   reads.push(r ? r.t4 : null); if (reads.length > 8) reads.shift();
   if (!r) return;
   $('camRead').textContent = r.t4; $('camRead').setAttribute('aria-label', r.t4 + '로 조회');
-  const known = PLATES.some(x => x.t4 === r.t4);    // 명단에 있는 번호면 한 번만 읽혀도 조회
-  const cnt = reads.filter(x => x === r.t4).length;   // 명단에 없으면 두 번 읽혀야 '미등록' 표시
-  if (r.t4 !== lastShown && (known || cnt >= 2)) showRead(r.t4, r.lead);
+  // 뒤 4자리 + 앞자리 숫자까지 명단의 차와 맞으면 한 번에 조회 (틀린 차를 띄울 위험이 매우 낮음)
+  // 그 밖에는 같은 숫자가 두 번 읽혀야 조회 (한 번 잘못 읽은 숫자로 다른 차가 뜨는 것을 막음)
+  const sure = !!r.lead && PLATES.some(x => x.t4 === r.t4 && x.front && r.lead.includes(x.front));
+  const cnt = reads.filter(x => x === r.t4).length;
+  if (r.t4 !== lastShown && (sure || cnt >= 2)) showRead(r.t4, r.lead);
 }
+
+// 한 장면 읽기: 후보 줄을 최대 3개까지 읽어 번호판다운 첫 결과를 씀
+async function readRegion(L, R){
+  const {rows, W} = plateRows(L, R);
+  for (const row of rows.slice(0, 3)) {
+    const r = plateLike(parseRead((await L.w.recognize(renderRow2(L, row, W, 44, 14))).data.text || ''));
+    if (r) return r;
+    if (!scanning && !R.test) return null;
+  }
+  return null;
+}
+window.__ocrTest = async (img, w, frac) => {   // 시험용: 이미지 한 장을 같은 방식으로 읽음 (frac = 읽을 영역 비율)
+  const L = {w, g: newCanvas(), t: newCanvas(), r: newCanvas()};
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height, f = frac || [0, 0, 1, 1];
+  return readRegion(L, {src: img, sx: iw * f[0], sy: ih * f[1], sw: iw * f[2], sh: ih * f[3], test: true});
+};
 
 async function loop(L){
   if (!scanning || L.busy) return;
   L.busy = true;
   try {
-    const f = grabPlate(L);
-    if (f) {
-      let r = parseRead((await L.w.recognize(f.c)).data.text || '');
-      if (!r && scanning) r = parseRead((await L.w.recognize(cleanPlate(L, f))).data.text || '');
-      handleRead(r);
-    }
+    const R = guideRegion();
+    if (R) handleRead(await readRegion(L, R));
   } catch(e) { console.warn(e); }
   L.busy = false;
   if (scanning) setTimeout(() => loop(L), 30);
