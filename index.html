@@ -571,7 +571,7 @@ async function startCam(){
   try {
     try { st = await ask(); }
     catch(e1) {   // 카메라가 다른 곳에서 사용 중이면 잠깐 기다렸다가 한 번 더
-      if (my !== camToken || !['NotReadableError', 'TrackStartError', 'AbortError', 'TimeoutError'].includes(e1 && e1.name)) throw e1;
+      if (my !== camToken || !['NotReadableError', 'TrackStartError', 'AbortError'].includes(e1 && e1.name)) throw e1;
       camBusSend('release'); await sleep(900);
       if (my !== camToken) return;
       st = await ask();
