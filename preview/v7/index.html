@@ -1,0 +1,885 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<base href="../../">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="차량조회">
+<meta name="robots" content="noindex,nofollow">
+<title>IFC 차량조회</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* v2 — 한 화면에 '검색창 → 판정 → 핵심 정보' 순서. 나머지는 접어둠 */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#14202b; --muted:#5b6876; --line:#d5dbe2;
+  --accent:#1d5fd1; --accent-fg:#ffffff;
+  --ok:#0f7a43; --ok-bg:#e3f4ea; --bad:#b42318; --bad-bg:#fdecea; --warn:#9a5b00; --warn-bg:#fff3d6;
+  --none:#3d4753; --none-bg:#e6e9ed; --plate-bg:#ffffff; --plate-line:#14202b;
+  --f-ui:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#0f151b; --panel:#18212a; --fg:#e8edf2; --muted:#93a0ad; --line:#2a3642;
+  --accent:#5b93f0; --accent-fg:#0b1220;
+  --ok:#4fd18b; --ok-bg:#12321f; --bad:#ff8a7a; --bad-bg:#3a1714; --warn:#f2bf55; --warn-bg:#352708;
+  --none:#c3ccd6; --none-bg:#232d37; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-ui);font-size:15px;line-height:1.5;
+  padding:env(safe-area-inset-top,0px) max(14px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px))}
+[hidden]{display:none!important}
+button{font-family:var(--f-ui)}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:10px}
+h1{font-size:18px;margin:0}
+.iconbtn{border:0;background:none;color:var(--muted);font:500 13.5px var(--f-ui);display:flex;align-items:center;gap:4px;cursor:pointer;padding:8px 6px;min-height:44px}
+.iconbtn svg{width:18px;height:18px}
+.info{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:6px;font-size:13.5px}
+.info .meta{color:var(--muted);font-variant-numeric:tabular-nums}
+.link{background:none;border:0;color:var(--accent);font:500 14px var(--f-ui);text-decoration:underline;cursor:pointer;padding:10px 0;min-height:44px;align-self:flex-start}
+.btn{font:700 16px var(--f-ui);border-radius:12px;padding:0 16px;cursor:pointer;background:var(--panel);color:var(--fg);border:2px solid var(--line);min-height:52px}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.btn:focus-visible,.iconbtn:focus-visible,.pick:focus-visible,.tab:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.hint{color:var(--muted);font-size:13px;margin:0}
+.err{color:var(--bad);font-size:14px;margin:0;font-weight:500}
+
+/* 잠금 */
+.lock{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.lock h2{margin:0;font-size:18px}
+.lock input{font:700 20px var(--f-ui);padding:13px 14px;border:2px solid var(--line);border-radius:12px;background:var(--bg);color:var(--fg)}
+.lock input:focus{outline:none;border-color:var(--accent)}
+
+/* 검색줄: 입력칸 + 카메라 버튼 */
+.search{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:6px;display:flex;gap:8px}
+.field{flex:1;min-width:0;position:relative}
+.inp{width:100%;font:700 24px/1 var(--f-ui);letter-spacing:.04em;padding:14px 46px 14px 14px;border:2px solid var(--line);border-radius:12px;background:var(--panel);color:var(--fg)}
+.inp::placeholder{font-size:17px;letter-spacing:0;font-weight:500;color:var(--muted)}
+.inp:focus{outline:none;border-color:var(--accent)}
+.clr{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:44px;height:44px;border-radius:50%;border:0;background:var(--none-bg);color:var(--muted);font-size:18px;cursor:pointer;line-height:1}
+.kbBtn{flex:none;width:48px;min-height:56px;border-radius:12px;border:2px solid var(--line);background:var(--panel);color:var(--fg);font:700 17px var(--f-ui);cursor:pointer}
+.kbBtn[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+.camBtn{flex:none;width:60px;min-height:56px;border-radius:12px;border:2px solid var(--accent);background:var(--accent);color:var(--accent-fg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;cursor:pointer;font:700 11.5px var(--f-ui)}
+.camBtn svg{width:24px;height:24px}
+.camBtn[aria-pressed="true"]{background:var(--panel);color:var(--accent)}
+
+/* 카메라 (켰을 때만 보임) */
+.cam{position:relative;background:#000;border-radius:14px;overflow:hidden;aspect-ratio:16/10;max-height:42vh;width:100%}
+.cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.guide{position:absolute;left:3%;width:94%;top:22%;height:56%;border-radius:10px;box-shadow:0 0 0 2000px rgba(0,0,0,.22);--c:rgba(255,255,255,.95);
+  background:linear-gradient(var(--c),var(--c)) top left/28px 4px,linear-gradient(var(--c),var(--c)) top left/4px 28px,
+    linear-gradient(var(--c),var(--c)) top right/28px 4px,linear-gradient(var(--c),var(--c)) top right/4px 28px,
+    linear-gradient(var(--c),var(--c)) bottom left/28px 4px,linear-gradient(var(--c),var(--c)) bottom left/4px 28px,
+    linear-gradient(var(--c),var(--c)) bottom right/28px 4px,linear-gradient(var(--c),var(--c)) bottom right/4px 28px;background-repeat:no-repeat}
+.guide.hit{--c:#4fd18b}
+.camstat{position:absolute;left:0;right:0;bottom:0;padding:8px 12px;color:#fff;font-size:13.5px;font-weight:500;background:linear-gradient(transparent,rgba(0,0,0,.75));display:flex;justify-content:space-between;gap:8px;align-items:flex-end}
+.readbtn{font:700 20px var(--f-ui);color:#fff;letter-spacing:.08em;font-variant-numeric:tabular-nums;cursor:pointer;padding:6px 10px;min-height:44px;border:0;border-radius:8px;background:rgba(255,255,255,.2)}.readbtn:empty{display:none}
+.camctl{position:absolute;top:8px;right:8px;display:flex;gap:6px}
+.pill{font:700 13px var(--f-ui);border:0;border-radius:999px;padding:8px 12px;background:rgba(0,0,0,.6);color:#fff;cursor:pointer;min-height:36px}
+.camerr{background:var(--bad-bg);color:var(--bad);border-radius:10px;padding:10px 12px;font-size:14px;margin:0}
+
+/* 결과: 판정 카드 */
+.res{border-radius:16px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;border:2px solid transparent}
+.res-ok{background:var(--ok-bg);border-color:var(--ok)}
+.res-warn{background:var(--warn-bg);border-color:var(--warn)}
+.res-bad{background:var(--bad-bg);border-color:var(--bad)}
+.res-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.word{font-size:26px;font-weight:700;line-height:1.2}
+.res-ok .word{color:var(--ok)}.res-warn .word{color:var(--warn)}.res-bad .word{color:var(--bad)}
+.res-sub{font-size:15px;font-weight:500;color:var(--fg)}
+.basis{font-size:17px;font-weight:700;color:var(--fg)}
+.plate{font:700 22px/1 var(--f-ui);letter-spacing:.05em;background:var(--plate-bg);color:#14202b;border:2px solid var(--plate-line);border-radius:6px;padding:6px 9px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.plate.sm{font-size:18px;padding:5px 8px}
+.plate mark{background:#ffe27a;color:inherit;border-radius:2px}
+.chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+.chip{border-radius:10px;padding:7px 4px;text-align:center;background:var(--panel);border:1.5px solid var(--line);min-width:0;display:flex;flex-direction:column;line-height:1.25}
+.chip .k{font-size:13px;color:var(--muted);font-weight:500}
+.chip .s{font-size:16.5px;font-weight:800}
+.chip .d{font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.chip.ok{border-color:var(--ok)}.chip.ok .s{color:var(--ok)}
+.chip.bad{border-color:var(--bad)}.chip.bad .s{color:var(--bad)}
+.chip.none .s{color:var(--muted);font-weight:500}
+
+/* 핵심 정보 + 상세 */
+.box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:4px 14px}
+.kv{display:flex;align-items:center;gap:10px;padding:10px 0;flex-wrap:wrap;border-bottom:1px solid var(--line);min-width:0}
+.kv:last-child{border-bottom:0}
+.kv .k{flex:none;width:52px;color:var(--muted);font-size:13.5px}
+.kv .v{flex:1;min-width:120px;font-weight:500;overflow-wrap:anywhere}
+.kv .v small{display:block;font-weight:400;color:var(--muted);font-size:14px;font-variant-numeric:tabular-nums}
+.call{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:0;background:var(--accent);color:var(--accent-fg);border-radius:12px;padding:0 14px;min-height:48px;font:700 15px var(--f-ui);text-decoration:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+.memo{border:1px dashed var(--line);color:var(--muted);border-radius:10px;padding:9px 12px;font-size:13px}
+.warn{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-size:13.5px;font-weight:500}
+details.more{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:0 14px}
+details.more summary{cursor:pointer;padding:13px 0;font-weight:700;font-size:14.5px;color:var(--accent);list-style:none;display:flex;justify-content:space-between}
+details.more summary::-webkit-details-marker{display:none}
+details.more summary::after{content:'펼치기 ▾';font-weight:500;color:var(--muted);font-size:13px}
+details.more[open] summary::after{content:'접기 ▴'}
+.sec-h{font-size:12.5px;font-weight:700;color:var(--muted);letter-spacing:.04em;margin:10px 0 2px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:0 0 12px;font-size:14px}
+dt{color:var(--muted)}dd{margin:0;min-width:0;overflow-wrap:anywhere}
+dd a{color:var(--accent);text-decoration:none;font-variant-numeric:tabular-nums}
+.nw{white-space:nowrap}
+.okc{color:var(--ok);font-weight:700}.badc{color:var(--bad);font-weight:700}
+
+/* 여러 대 일치: 고르기 목록 */
+.list{display:flex;flex-direction:column;gap:8px}
+.pick{display:flex;flex-direction:column;gap:8px;text-align:left;background:var(--panel);border:1.5px solid var(--line);border-radius:14px;padding:12px;cursor:pointer;color:var(--fg);width:100%}
+.pick-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.pick .co{font-size:14px;color:var(--muted);overflow-wrap:anywhere}
+.pick-ok{border:2px solid var(--ok)}.pick-warn{border:2px solid var(--warn)}.pick-bad{border:2px solid var(--bad)}
+.badge{font-weight:800;font-size:18px;padding:6px 12px;border-radius:999px;white-space:nowrap}
+.b-ok{background:var(--ok-bg);color:var(--ok)}.b-warn{background:var(--warn-bg);color:var(--warn)}.b-bad{background:var(--bad-bg);color:var(--bad)}
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;gap:8px;padding:10px max(14px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(14px,env(safe-area-inset-left,0px));background:var(--bg);border-top:1px solid var(--line);box-shadow:0 -4px 14px rgba(0,0,0,.08)}
+.dock .btn{flex:1}
+body.has-dock{padding-bottom:calc(96px + env(safe-area-inset-bottom,0px))}
+.multi-h{margin:0;font-size:15px;color:var(--fg)}.multi-h b{font-size:18px}
+.res-neutral{background:var(--panel);border-color:var(--line)}
+
+/* 처음 화면 안내 */
+.empty{display:flex;flex-direction:column;gap:6px;padding:4px 2px}
+.empty b{font-size:15px}
+
+/* 식단 */
+.menu{display:flex;flex-direction:column;gap:10px;margin-top:10px;padding-top:14px;border-top:1px solid var(--line)}
+.menu-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.menu-h h2{font-size:17px;margin:0}
+.meta{color:var(--muted);font-size:12.5px;font-variant-numeric:tabular-nums}
+.tabs{display:flex;gap:5px;overflow-x:auto}
+.tab{font:700 14px var(--f-ui);border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:10px;padding:6px 0;min-width:42px;min-height:44px;flex:1;cursor:pointer;display:flex;flex-direction:column;align-items:center;line-height:1.2}
+.tab small{font-weight:400;font-size:11px;color:var(--muted)}
+.tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
+.tab[aria-selected="true"] small{color:var(--accent-fg)}
+.meal-now{background:var(--panel);border:2px solid var(--accent);border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;gap:4px}
+.meal-now h3{margin:0;font-size:13px;color:var(--accent);font-weight:700}
+.meal-now .main{font-size:19px;font-weight:700;line-height:1.3}
+.meal-now .sides{font-size:14px;color:var(--muted)}
+.meal-others{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.meal{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+.meal h3{margin:0 0 2px;font-size:12.5px;color:var(--muted);font-weight:700}
+.meal .main{font-weight:700;font-size:15px;line-height:1.3}
+.meal .sides{font-size:13px;color:var(--muted)}
+.meal.closed .main{color:var(--muted);font-weight:500}
+.menu details summary{cursor:pointer;color:var(--accent);font-weight:500;font-size:14.5px;padding:12px 0;min-height:44px}
+.menu details a{display:block;min-height:44px}
+.menu details img{width:100%;border-radius:8px;border:1px solid var(--line);margin-top:6px;background:#fff}
+@media (prefers-reduced-motion:no-preference){.res{animation:pop .16s ease-out}@keyframes pop{from{transform:scale(.985)}to{transform:none}}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <h1>IFC 차량조회</h1>
+    <button class="iconbtn" type="button" id="infoBtn" aria-expanded="false" aria-controls="info" hidden>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg>명단 갱신일
+    </button>
+  </div>
+  <div class="info" id="info" hidden>
+    <span class="meta" id="meta"></span>
+    <span class="meta" id="counts"></span>
+    <button class="link" type="button" id="logout">비밀번호 다시 입력</button>
+  </div>
+
+  <!-- 비밀번호 -->
+  <form class="lock" id="lock" hidden autocomplete="off">
+    <h2>비밀번호를 입력하세요</h2>
+    <p class="hint">관리자에게 받은 비밀번호입니다. 이 휴대폰에서는 한 번만 입력하면 됩니다.</p>
+    <input id="pw" type="password" autocomplete="current-password" aria-label="비밀번호">
+    <p class="err" id="pwErr" hidden></p>
+    <button class="btn primary" type="submit" id="pwBtn">열기</button>
+  </form>
+  <p class="err" id="loadErr" hidden></p>
+
+  <!-- 본 화면 -->
+  <div id="main" hidden style="display:flex;flex-direction:column;gap:12px">
+    <form class="search" id="f" autocomplete="off" role="search">
+      <div class="field">
+        <input class="inp" id="q" placeholder="뒤 4자리" aria-label="차량번호 또는 회사명" enterkeyhint="search" inputmode="numeric" autocomplete="off">
+        <button class="clr" type="button" id="clr" aria-label="지우기" hidden>✕</button>
+      </div>
+      <button class="kbBtn" type="button" id="kbBtn" aria-pressed="false" aria-label="한글 키보드로 바꾸기 (전체 번호·회사명 입력)">가</button>
+      <button class="camBtn" type="button" id="camStart" aria-pressed="false" aria-label="카메라로 번호판 비추기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg><span id="camLbl">카메라</span>
+      </button>
+    </form>
+
+    <p class="camerr" id="camErr" hidden></p>
+    <div class="cam" id="cam" hidden>
+      <video id="video" playsinline muted autoplay></video>
+      <div class="guide" id="guide"></div>
+      <div class="camctl"><button class="pill" type="button" id="pauseBtn">일시정지</button></div>
+      <div class="camstat"><span id="camMsg">번호판을 화면 가운데쯤 비춰주세요</span><button type="button" class="readbtn" id="camRead" aria-label="읽은 번호로 조회"></button></div>
+    </div>
+
+    <div id="out"></div>
+  </div>
+  <div class="dock" id="dock" hidden>
+    <button class="btn" type="button" id="dockClr">✕ 다시 입력</button>
+    <button class="btn primary" type="button" id="dockCam">📷 카메라</button>
+  </div>
+
+  <!-- 식단 -->
+  <section class="menu" id="menuBox" hidden>
+    <div class="menu-h"><h2 id="menuTitle">오늘의 식단</h2><span class="meta" id="menuWeek"></span></div>
+    <p class="warn" id="menuOld" hidden></p>
+    <div class="tabs" id="menuTabs" role="tablist" aria-label="요일"></div>
+    <div id="menuDay"></div>
+    <p class="hint" id="menuHours"></p>
+    <details id="menuFull"><summary>주간 식단표 원본 보기</summary><a id="menuImgLink" href="menu.png" target="_blank" rel="noopener"><img id="menuImg" alt="IFC 카페테리아 주간식단표" loading="lazy"></a></details>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const store = { get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }, set(k,v){ try { localStorage.setItem(k,v); } catch(e){} }, del(k){ try { localStorage.removeItem(k); } catch(e){} } };
+
+/* ---------- 암호 해제 ---------- */
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function pwKey(pw, salt, iter, use){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt:b64d(salt), iterations:iter, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, [use]);
+}
+async function gunzip(buf){
+  if (typeof DecompressionStream === 'undefined') throw new Error('nogzip');
+  const st = new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'));
+  return new Response(st).arrayBuffer();
+}
+async function decrypt(pack, pw){
+  let plain;
+  if (pack.v === 2) {
+    const p = KEYS.priv;
+    const pk8 = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(p.iv)}, await pwKey(pw, p.salt, p.iter, 'decrypt'), b64d(p.ct));
+    const priv = await crypto.subtle.importKey('pkcs8', pk8, {name:'RSA-OAEP', hash:'SHA-256'}, false, ['decrypt']);
+    const raw = await crypto.subtle.decrypt({name:'RSA-OAEP'}, priv, b64d(pack.ek));
+    const k = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']);
+    plain = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, k, b64d(pack.ct));
+  } else {
+    plain = await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(pack.iv)}, await pwKey(pw, pack.salt, pack.iter, 'decrypt'), b64d(pack.ct));
+  }
+  if (pack.z === 'gzip') plain = await gunzip(plain);
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+let KEYS = null;
+let DB = null, PACK = null, SPACK = null, DPACK = null, seasonErr = '';
+async function boot(){
+  try {
+    const r = await fetch('data.enc?t=' + Date.now(), {cache:'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    PACK = await r.json();
+    if (PACK.v === 2) { const k = await fetch('keys.json?t=' + Date.now(), {cache:'no-store'}); if (!k.ok) throw new Error('keys'); KEYS = await k.json(); }
+  } catch(e) {
+    $('loadErr').textContent = '명단 파일(data.enc)을 불러오지 못했습니다. 인터넷 연결을 확인하거나 관리자에게 문의하세요.';
+    $('loadErr').hidden = false; return;
+  }
+  const opt = async f => { try { const r = await fetch(f + '?t=' + Date.now(), {cache:'no-store'}); return r.ok ? await r.json() : null; } catch(e) { return null; } };
+  [SPACK, DPACK] = await Promise.all([opt('season.enc'), opt('dock.enc')]);
+  const saved = store.get('ifc-pw');
+  if (saved) { try { await unlock(saved); return; } catch(e) { store.del('ifc-pw'); } }
+  $('lock').hidden = false; $('pw').focus();
+}
+async function unlock(pw){
+  const d = await decrypt(PACK, pw);          // 비밀번호가 틀리면 여기서 실패
+  const tryOpen = async pk => { if (!pk) return null; try { return await decrypt(pk, pw); } catch(e) {
+    seasonErr = e && e.message === 'nogzip' ? '이 브라우저가 너무 오래돼 정기권 명단을 열 수 없습니다. 브라우저를 업데이트하세요.' : '정기권 명단을 열지 못했습니다.'; return null; } };
+  const [sz, dz] = await Promise.all([tryOpen(SPACK), tryOpen(DPACK)]);
+  open(d, sz, dz);
+}
+$('lock').addEventListener('submit', async e => {
+  e.preventDefault();
+  const pw = $('pw').value; if (!pw) return;
+  $('pwBtn').disabled = true; $('pwErr').hidden = true;
+  try { await unlock(pw); store.set('ifc-pw', pw); $('lock').hidden = true; }
+  catch(err) { $('pwErr').textContent = '비밀번호가 맞지 않습니다. 명단이 새로 바뀌면서 비밀번호가 바뀌었을 수도 있습니다.'; $('pwErr').hidden = false; }
+  $('pwBtn').disabled = false;
+});
+$('logout').onclick = () => { store.del('ifc-pw'); location.reload(); };
+$('infoBtn').onclick = () => { const o = $('info').hidden; $('info').hidden = !o; $('infoBtn').setAttribute('aria-expanded', o); };
+
+/* ---------- 조회 ---------- */
+const norm = s => String(s || '').replace(/[\s\-·.]/g, '').replace(/^(서울|경기|인천|부산|대구|광주|대전|울산|세종|강원|충북|충남|전북|전남|경북|경남|제주)/, '');
+const digits = s => String(s || '').replace(/\D/g, '');
+const pad2 = n => String(n).padStart(2, '0');
+const nowS = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`; };
+let PLATES = [];   // [{n, p, t4, front, pass:[], season:[], void:[]}]
+let LOADED = {main:false, B4:false};
+
+function open(d, sz, dz){
+  DB = d;
+  const season = [...(sz ? (sz.season || []) : (d.season || [])), ...((dz && dz.season) || []).map(r => ({...r, zone: r.zone || 'B4'}))];
+  const map = new Map();
+  const add = (r, kind) => {
+    const n = norm(r.n || r.p); if (!n) return;
+    if (!map.has(n)) { const dd = digits(n); map.set(n, {n, p:r.p, t4:dd.slice(-4), front:digits(n.split(/[가-힣]/)[0]), pass:[], season:[], void:[]}); }
+    map.get(n)[kind].push(r);
+  };
+  (d.pass||[]).forEach(r => add(r,'pass')); season.forEach(r => add(r,'season')); (d.void||[]).forEach(r => add(r,'void'));
+  PLATES = [...map.values()];
+  LOADED = {main: !!(sz || (d.season || []).length), B4: !!dz};
+  $('main').hidden = false; $('infoBtn').hidden = false;
+  $('meta').textContent = '명단 기준 · 비표 ' + (d.updated || '').slice(5) + (sz ? ' · 정기권 ' + (sz.exported || sz.updated || '').slice(5) : '') + (dz ? ' · 로딩덕 ' + (dz.exported || dz.updated || '').slice(5) : '');
+  const np = new Set((d.pass||[]).map(r => norm(r.n))).size;
+  const nv = PLATES.filter(x => validSeason(x, 'main').length).length, nd = PLATES.filter(x => validSeason(x, 'B4').length).length;
+  $('counts').textContent = `비표 ${np}대 · 정기권 ${season.length ? '유효 ' + nv + '대' : (seasonErr || '명단 없음')}${dz ? ' · 로딩덕 유효 ' + nd + '대' : ''}`;
+  if (seasonErr) { $('loadErr').textContent = seasonErr; $('loadErr').hidden = false; }
+  render('');
+  if (store.get('ifc-cam') === '1') startCam();
+}
+
+// 정기권 상태: valid(유효) / expired(만료) / future(시작 전) / off(미사용)
+const sState = r => !r.use ? 'off' : (nowS() < (r.fr || '') ? 'future' : nowS() > (r.to || '9999') ? 'expired' : 'valid');
+const S_LABEL = {valid:'유효', expired:'만료', future:'시작 전', off:'미사용'};
+const zoneOf = r => r.zone === 'B4' ? 'B4' : 'main';
+const ZNAME = {main:'지하 정기권', B4:'지하4층 로딩덕'};
+const inZone = (x, z) => z ? x.season.filter(r => zoneOf(r) === z) : x.season;
+const validSeason = (x, z) => inZone(x, z).filter(r => sState(r) === 'valid');
+const bestSeason = (x, z) => validSeason(x, z)[0] || [...inZone(x, z)].sort((a, b) => (b.to || '').localeCompare(a.to || ''))[0];
+const zonesOf = x => ['main', 'B4'].filter(z => inZone(x, z).length);
+const isActive = x => x.pass.length || validSeason(x).length;
+const period = r => `${(r.fr || '').slice(0, 10)} ~ ${(r.to || '') >= '2100' ? '무기한' : (r.to || '').slice(0, 10)}`;
+
+function find(raw, ocrDigits){
+  const q = norm(raw), d = digits(q), hasHan = /[가-힣]/.test(q);
+  if (!q) return null;
+  if (!d && (hasHan || /[a-z]{2,}/i.test(q))) {
+    const k = q.toLowerCase();
+    return {mode:'company', list: PLATES.filter(x => [...x.pass, ...x.season].some(r => norm(r.c).toLowerCase().includes(k)))};
+  }
+  if (d.length < 4) return {mode:'short'};
+  const t = d.slice(-4);
+  let list = PLATES.filter(x => x.t4 === t);
+  if (hasHan && d.length >= 6) {
+    const ex = list.filter(x => x.n === q);
+    if (ex.length) return {mode:'exact', list: ex};
+  }
+  // 앞자리 숫자가 맞는 차량을 앞으로
+  const lead = ocrDigits || (hasHan ? digits(q.split(/[가-힣]/)[0]) : '');
+  if (lead) list.sort((a,b) => (lead.startsWith(b.front) && b.front ? 1 : 0) - (lead.startsWith(a.front) && a.front ? 1 : 0));
+  return {mode: hasHan ? 'full' : 'tail', list, t};
+}
+
+const rawNum = p => String(p || '').replace(/[^\d]/g, '');
+// 전화로 걸 수 있는 번호만 인정. 7~8자리 내선(예 6676-2616)은 서울 02를 붙임
+function telOf(p){
+  let n = rawNum(p);
+  if (/^[2-9]\d{6,7}$/.test(n) && !/^1[5-9]\d{6}$/.test(n)) n = '02' + n;
+  return /^01[016789]\d{7,8}$/.test(n) || /^02\d{7,8}$/.test(n) || /^0[3-9]\d{8,9}$/.test(n) || /^1[5-9]\d{6}$/.test(n) ? n : '';
+}
+function fmtTel(p){
+  const n = telOf(p); if (!n) return String(p || '');
+  if (/^02/.test(n)) return n.replace(/^(02)(\d{3,4})(\d{4})$/, '$1-$2-$3');
+  if (/^1[5-9]/.test(n)) return n.replace(/^(\d{4})(\d{4})$/, '$1-$2');
+  return n.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
+}
+const callBtn = p => { const n = telOf(p); return n ? `<a class="call" href="tel:${n}" aria-label="${esc(fmtTel(p))}로 전화 걸기">☎ 전화</a>` : ''; };
+const telHtml = p => { p = String(p || '').trim(); if (!p) return ''; const n = telOf(p); return n ? `<br><a href="tel:${n}">${esc(fmtTel(p))}</a>` : `<br>${esc(p)}`; };
+function hl(plate, t){ if (!t) return esc(plate); const i = plate.lastIndexOf(t); return i < 0 ? esc(plate) : esc(plate.slice(0,i)) + '<mark>' + esc(t) + '</mark>' + esc(plate.slice(i+4)); }
+const md = v => (v || '') >= '2100' ? '무기한' : (v || '').slice(5, 10);
+
+// 세 칸 (비표 / 정기권 / 로딩덕)
+function chip(cls, k, s, d){ return `<div class="chip ${cls}"><span class="k">${k}</span><span class="s">${s}</span><span class="d">${d || '&nbsp;'}</span></div>`; }
+function chips(x, dim){
+  const c = [];
+  if (x && x.pass.length) c.push(chip('ok', '드랍존 비표', '✓ 등록', esc([...new Set(x.pass.map(r => r.b))].join('·'))));
+  else if (x && x.void.length) c.push(chip('bad', '드랍존 비표', '✕ ' + esc(x.void[0].st || '해지'), '사용 불가'));
+  else c.push(chip('none', '드랍존 비표', '없음', ''));
+  for (const z of ['main', 'B4']) {
+    const k = z === 'B4' ? '지하4층 로딩덕' : '지하 정기권';
+    const recs = x ? inZone(x, z) : [];
+    if (!recs.length) { c.push(chip('none', k, LOADED[z] ? '없음' : '명단 없음', '')); continue; }
+    const r = bestSeason(x, z), st = sState(r);
+    if (st === 'valid') c.push(chip('ok', k, '✓ 유효', (r.b ? `<span class="nw">${esc(r.b)}</span> ` : '') + `<span class="nw">~${esc(md(r.to))}</span>`));
+    else if (st === 'future') c.push(chip(dim ? 'none' : 'bad', k, (dim ? '' : '✕ ') + '시작 전', esc(md(r.fr)) + '부터'));
+    else if (st === 'expired') c.push(chip(dim ? 'none' : 'bad', k, (dim ? '' : '✕ ') + '만료', esc(md(r.to))));
+    else c.push(chip(dim ? 'none' : 'bad', k, (dim ? '' : '✕ ') + '미사용', ''));
+  }
+  return `<div class="chips" role="group" aria-label="등록 현황">${c.join('')}</div>`;
+}
+
+// 차량 하나의 판정 — 사용 가능 / 확인 필요 / 사용 불가 / 미등록
+function judge(x, raw){
+  if (!x) return {cls:'bad', word:'미등록', basis:'', sub: LOADED.main || LOADED.B4 ? '비표·정기권·로딩덕 어디에도 없습니다' : '비표 명단에 없습니다'};
+  const vs = validSeason(x);
+  const company = (x.pass[0] && x.pass[0].c) || ((vs[0] || bestSeason(x) || {}).c) || (x.void[0] && x.void[0].c) || '';
+  const bld = (x.pass[0] && x.pass[0].b) || ((vs[0] || {}).b) || '';
+  if (isActive(x)) {
+    const have = [];
+    if (x.pass.length) have.push('드랍존 비표');
+    if (validSeason(x, 'main').length) have.push('지하 정기권');
+    if (validSeason(x, 'B4').length) have.push('로딩덕');
+    const warn = false;   // 명단 품질 메모는 판정에 반영하지 않고 아래 메모로만 표시
+    const guess = /[가-힣]/.test(norm(raw)) && digits(norm(raw)).length >= 6 && x.n !== norm(raw);
+    const basis = x.pass.length ? have.join(' + ') : '드랍존 비표 없음 · ' + have.join(' + ') + '만 있음';
+    const word = guess ? '확인 필요' : x.pass.length ? '사용 가능' : '정기권 차량';
+    return {cls: guess ? 'warn' : 'ok', word, basis,
+            sub: [company, bld].filter(Boolean).join(' · ') + (guess ? ' · 번호판 한글을 직접 확인하세요' : warn ? ' · 아래 확인 사항을 보세요' : '')};
+  }
+  if (x.season.length && !x.pass.length) {
+    const r = bestSeason(x), st = sState(r);
+    const zn = zoneOf(r) === 'B4' ? '로딩덕' : '지하 정기권';
+    const why = st === 'expired' ? `${zn} ${md(r.to)} 만료` : st === 'future' ? `${zn} ${md(r.fr)}부터 사용` : `${zn} 미사용 처리`;
+    return {cls:'bad', word:'사용 불가', basis: why, sub: company};
+  }
+  return {cls:'bad', word:'사용 불가', basis: `드랍존 비표 ${x.void[0].st || '해지'} 처리`, sub: company};
+}
+
+// 핵심 정보 (기사·담당자 전화)
+function keyInfo(x){
+  const p = x.pass[0], s = validSeason(x)[0] || bestSeason(x), rows = [];
+  if (p) {
+    if (p.d || p.dp) rows.push(`<div class="kv"><span class="k">기사</span><span class="v">${esc(p.d) || '이름 없음'}${p.dp ? `<small>${esc(fmtTel(p.dp))}</small>` : ''}${p.m ? `<small>${esc(p.m)}</small>` : ''}</span>${callBtn(p.dp)}</div>`);
+    if (p.mg || p.mp || p.ext) rows.push(`<div class="kv"><span class="k">담당자</span><span class="v">${esc(p.mg) || '이름 없음'}${p.mp ? `<small>${esc(fmtTel(p.mp))}</small>` : ''}${p.ext ? `<small>내선 ${esc(fmtTel(p.ext))}</small>` : ''}</span>${callBtn(p.mp || p.ext)}</div>`);
+  } else if (s) {
+    if (s.d || s.dp || s.m) rows.push(`<div class="kv"><span class="k">이름</span><span class="v">${esc(s.d) || '이름 없음'}${s.dp ? `<small>${esc(fmtTel(s.dp))}</small>` : ''}${s.m ? `<small>${esc(s.m)}</small>` : ''}</span>${callBtn(s.dp)}</div>`);
+    if (s.room) rows.push(`<div class="kv"><span class="k">${/호텔/.test(s.prod || '') ? '객실' : '주소'}</span><span class="v">${esc(s.room)}${/호텔/.test(s.prod || '') ? '호' : ''}</span></div>`);
+  } else if (x.void[0]) {
+    const v = x.void[0];
+    if (v.d || v.dp) rows.push(`<div class="kv"><span class="k">기사</span><span class="v">${esc(v.d) || '이름 없음'}${v.dp ? `<small>${esc(fmtTel(v.dp))}</small>` : ''}</span>${callBtn(v.dp)}</div>`);
+  }
+  return rows.length ? `<div class="box">${rows.join('')}</div>` : '';
+}
+
+// 상세 (접어둠)
+function passDl(r, title){
+  return `<p class="sec-h">${title}</p><dl><dt>회사</dt><dd>${esc(r.c) || '-'}</dd>
+      <dt>차종</dt><dd>${esc(r.m) || '-'}</dd>
+      <dt>기사</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>
+      <dt>담당자</dt><dd>${esc(r.mg) || '-'}${telHtml(r.mp)}${r.ext ? `<br>내선 ${esc(fmtTel(r.ext))}` : ''}</dd>
+      <dt>관리번호</dt><dd>${esc(r.no) || '-'}${r.dt ? ' · ' + esc(r.dt) : ''}</dd>
+      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}</dl>`;
+}
+function seasonDl(x, z){
+  const r = bestSeason(x, z), st = sState(r), others = inZone(x, z).filter(o => o !== r);
+  return `<p class="sec-h">${z === 'B4' ? '지하4층 로딩덕 정기권' : '지하 정기권'}</p><dl>
+      <dt>상품</dt><dd>${esc(r.prod) || '-'}${r.pt ? ' · ' + esc(r.pt) : ''}</dd>
+      <dt>기간</dt><dd>${esc(period(r))} <b class="${st === 'valid' ? 'okc' : 'badc'}">${S_LABEL[st]}</b></dd>
+      <dt>업체</dt><dd>${esc(r.c) || '-'}</dd>
+      ${r.m ? `<dt>차종</dt><dd>${esc(r.m)}</dd>` : ''}
+      ${r.d || r.dp ? `<dt>이름</dt><dd>${esc(r.d) || '-'}${telHtml(r.dp)}</dd>` : ''}
+      ${r.room ? `<dt>${/호텔/.test(r.prod || '') ? '호텔 객실' : '주소'}</dt><dd>${esc(r.room)}</dd>` : ''}
+      ${r.o ? `<dt>비고</dt><dd>${esc(r.o)}</dd>` : ''}
+      ${others.length ? `<dt>다른 기록</dt><dd>${others.slice(0, 3).map(o => esc(o.prod) + ' ' + S_LABEL[sState(o)] + ' (' + esc(period(o)) + ')').join('<br>')}${others.length > 3 ? ` 외 ${others.length - 3}건` : ''}</dd>` : ''}</dl>`;
+}
+function details(x){
+  let h = '';
+  x.pass.forEach((r, i) => { h += passDl(r, x.pass.length > 1 ? `드랍존 비표 ${i + 1} (${esc(r.b)})` : '드랍존 비표'); });
+  zonesOf(x).forEach(z => { h += seasonDl(x, z); });
+  if (!x.pass.length && x.void.length) h += passDl(x.void[0], `${esc(x.void[0].st || '해지')} 비표 기록`);
+  return h ? `<details class="more"><summary>상세 정보</summary>${h}</details>` : '';
+}
+
+// 한 대 결과 화면
+function single(x, raw, t){
+  const j = judge(x, raw);
+  const warns = x ? [...new Set(x.pass.flatMap(r => r.w || []))] : [];
+  return `<div class="res res-${j.cls}" role="status">
+      <div class="res-head">${x ? `<span class="plate">${hl(x.p, t)}</span>` : `<span class="plate">${esc(raw)}</span>`}<span class="word">${j.word}</span></div>
+      ${j.basis ? `<div class="basis">${esc(j.basis)}</div>` : ''}
+      ${j.sub ? `<div class="res-sub">${esc(j.sub)}</div>` : ''}
+      ${x ? chips(x) : `<div class="res-sub">뒤 4자리를 다시 확인하거나 카메라로 다시 비춰보세요.</div>`}
+    </div>
+    ${x ? keyInfo(x) : ''}
+    ${warns.length ? `<div class="memo"><b>관리자 확인 메모</b> (현장 판정과 무관)<br>${warns.map(esc).join('<br>')}</div>` : ''}
+    ${x ? details(x) : ''}`;
+}
+
+// 여러 대: 고르기 목록
+function pickRow(x, t){
+  const j = judge(x, '');
+  return `<button class="pick pick-${j.cls}" type="button" data-n="${esc(x.n)}">
+      <span class="pick-top"><span class="plate sm">${hl(x.p, t)}</span><span class="badge b-${j.cls}">${j.word}</span></span>
+      <span class="co">${esc([j.basis, j.sub.replace(/ · (번호판|아래).*$/, '')].filter(Boolean).join(' · ')) || '&nbsp;'}</span>
+      ${chips(x, isActive(x))}
+    </button>`;
+}
+
+let VIEW = null;   // 고른 차량 (여러 대 중 하나를 눌렀을 때)
+function render(raw, ocrDigits){
+  $('clr').hidden = !raw;
+  const showDock = !!raw && !stream; $('dock').hidden = !showDock; document.body.classList.toggle('has-dock', showDock);
+  if (!raw) { VIEW = null; $('out').innerHTML = emptyHtml(); return null; }
+  const res = find(raw, ocrDigits);
+  if (!res) { $('out').innerHTML = emptyHtml(); return null; }
+  if (res.mode === 'short') { $('out').innerHTML = `<p class="hint">숫자 4자리를 입력하면 바로 조회합니다.</p>`; return null; }
+  const t = res.t;
+  if (res.mode === 'company') {
+    const list = res.list.filter(isActive);
+    $('out').innerHTML = `<div class="res res-neutral" role="status"><div class="res-head"><span class="word" style="color:var(--fg)">${list.length ? `${list.length}대 검색됨` : '검색 결과 없음'}</span></div><div class="res-sub">회사명 "${esc(raw)}"${list.length > 5 ? ' · 차량번호 뒤 4자리로 조회하면 바로 찾을 수 있어요' : ''}</div></div>
+      <div class="list">${list.slice(0, 30).map(x => pickRow(x, '')).join('')}</div>${list.length > 30 ? '<p class="hint">앞의 30대만 보여드립니다. 차량번호로 조회하면 정확합니다.</p>' : ''}`;
+    return list.length ? 'ok' : 'none';
+  }
+  if (res.list.length <= 1) {
+    const x = res.list[0] || null;
+    $('out').innerHTML = `<div class="list">${single(x, x ? raw : raw, t)}</div>`;
+    return x && isActive(x) ? 'ok' : 'none';
+  }
+  // 여러 대: 쓸 수 있는 차량 먼저
+  const list = [...res.list.filter(isActive), ...res.list.filter(x => !isActive(x))];
+  $('out').innerHTML = `<p class="multi-h" role="status"><b>${list.length}대 일치</b> · 뒤 4자리 ${esc(t)} · 앞자리를 보고 해당 차량을 누르세요</p>
+    <div class="list">${list.map(x => pickRow(x, t)).join('')}</div>`;
+  return list.some(isActive) ? 'ok' : 'none';
+}
+$('out').addEventListener('click', e => {
+  const b = e.target.closest('.pick'); if (!b) return;
+  const x = PLATES.find(p => p.n === b.dataset.n); if (!x) return;
+  $('q').value = x.p; render(x.p); window.scrollTo({top: 0, behavior: 'smooth'});
+});
+$('q').addEventListener('input', e => render(e.target.value));
+$('dockClr').onclick = () => { $('q').value = ''; render(''); lastShown = ''; window.scrollTo({top: 0}); $('q').focus(); };
+$('dockCam').onclick = () => { window.scrollTo({top: 0}); if (!stream) startCam(); };
+$('kbBtn').onclick = () => { const q = $('q'), han = q.inputMode !== 'text';
+  q.inputMode = han ? 'text' : 'numeric'; $('kbBtn').textContent = han ? '123' : '가'; $('kbBtn').setAttribute('aria-pressed', han);
+  $('kbBtn').setAttribute('aria-label', han ? '숫자 키패드로 바꾸기' : '한글 키보드로 바꾸기 (전체 번호·회사명 입력)');
+  q.placeholder = han ? '번호·회사명' : '뒤 4자리'; q.blur(); setTimeout(() => q.focus(), 50); };
+$('f').addEventListener('submit', e => { e.preventDefault(); $('q').blur(); });
+$('clr').onclick = () => { $('q').value = ''; render(''); lastShown = ''; $('q').focus(); };
+function emptyHtml(){
+  return `<p class="hint" style="font-size:14px">뒤 4자리를 입력하거나 <b>카메라</b>로 번호판을 비추세요. 전체 번호·회사명은 <b>가</b> 버튼.</p>`;
+}
+/* ---------- 카메라 + 숫자 인식 ---------- */
+let stream = null, scanning = false, lastShown = '', reads = [];
+const lanes = [];   // 휴대폰 코어 수에 따라 1~2개를 동시에 돌림
+function newCanvas(){ const c = document.createElement('canvas'); return {c, x: c.getContext('2d', {willReadFrequently:true})}; }
+
+// 일정 시간 안에 끝나지 않으면 실패로 처리 (휴대폰이 카메라 요청에 응답하지 않고 멈추는 경우 대비)
+const withTimeout = (pr, ms) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), {name: 'TimeoutError'})), ms))]);
+let camToken = 0;   // 켜는 도중 다시 누르면 앞의 시도는 버림
+async function startCam(){
+  const my = ++camToken;
+  $('camErr').hidden = true; $('camLbl').textContent = '켜는 중';
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  let st;
+  try {
+    st = await withTimeout(navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false}), 8000);
+  } catch(e) {
+    if (my !== camToken) return;
+    $('camErr').textContent = e && e.name === 'NotAllowedError'
+      ? '카메라 권한이 거부되었습니다. 브라우저 설정에서 이 사이트의 카메라를 허용한 뒤 다시 누르세요.'
+      : e && e.name === 'TimeoutError'
+      ? '카메라가 응답하지 않아요. 카메라 버튼을 다시 눌러주세요. (계속 안 되면 페이지를 새로고침하세요)'
+      : '카메라를 켤 수 없습니다. 다른 앱이 카메라를 쓰고 있으면 닫고 다시 누르세요. 번호는 직접 입력해도 됩니다.';
+    $('camErr').hidden = false; $('camStart').setAttribute('aria-pressed', 'false'); $('camLbl').textContent = '카메라'; return;
+  }
+  if (my !== camToken) { st.getTracks().forEach(t => t.stop()); return; }
+  stream = st;
+  // 카메라가 중간에 꺼지면(다른 앱으로 전환 등) 화면을 정리
+  st.getVideoTracks().forEach(t => t.addEventListener('ended', () => { if (stream === st) { camEnded(); } }));
+  const v = $('video'); v.srcObject = stream;
+  try { await withTimeout(v.play(), 4000); } catch(e) { /* 소리 없는 영상이라 대부분 그대로 재생됨 */ }
+  if (my !== camToken) return;
+  store.set('ifc-cam', '1');
+  $('dock').hidden = true; document.body.classList.remove('has-dock');
+  $('cam').hidden = false; $('camStart').setAttribute('aria-pressed', 'true'); $('camLbl').textContent = '끄기';
+  if (!lanes.length) {
+    $('camMsg').textContent = '인식 준비 중… (처음 한 번은 조금 걸립니다)';
+    const want = (navigator.hardwareConcurrency || 2) >= 4 ? 2 : 1;
+    try {
+      for (let i = 0; i < want; i++) {
+        const w = await Tesseract.createWorker('eng', 1, window.TESS_OPTS || {});
+        await w.setParameters({ tessedit_char_whitelist: '0123456789', tessedit_pageseg_mode: '7' });
+        lanes.push({w, busy:false, a:newCanvas(), b:newCanvas(), g:newCanvas(), t:newCanvas(), r:newCanvas()});
+      }
+    } catch(e) { if (!lanes.length) { $('camMsg').textContent = '인식 엔진을 불러오지 못했습니다. 번호를 직접 입력하세요.'; return; } }
+  }
+  if (!stream) return;
+  $('camMsg').textContent = '번호판을 화면 가운데쯤 비춰주세요';
+  $('pauseBtn').textContent = '일시정지';
+  scanning = true; runAll();
+}
+function camEnded(){   // 휴대폰이 카메라를 꺼버린 경우: 화면이 다시 보이면 자동으로 다시 켬
+  scanning = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('video').srcObject = null;
+  if (!document.hidden) startCam(); else camResume = true;
+}
+let camResume = false;
+function stopCam(){
+  camToken++;
+  scanning = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('video').srcObject = null; $('cam').hidden = true;
+  $('camStart').setAttribute('aria-pressed', 'false'); $('camLbl').textContent = '카메라';
+  store.set('ifc-cam', '0');
+  render($('q').value);
+}
+function runAll(){ lanes.forEach((L, i) => setTimeout(() => loop(L), i * 150)); }
+$('camStart').onclick = () => ($('camLbl').textContent === '끄기' && stream) ? stopCam() : startCam();
+$('pauseBtn').onclick = () => {
+  scanning = !scanning; $('pauseBtn').textContent = scanning ? '일시정지' : '다시 시작';
+  $('camMsg').textContent = scanning ? '번호판을 화면 가운데쯤 비춰주세요' : '일시정지됨';
+  if (scanning) { lastShown = ''; reads = []; runAll(); }
+};
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; }
+    return;
+  }
+  // 다시 화면으로 돌아왔을 때: 카메라가 꺼져 있으면 다시 켜고, 살아 있으면 인식 재개
+  const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live' && !t.muted);
+  if (camResume || (stream && !live)) { camResume = false; startCam(); }
+  else if (stream && !scanning && lanes.length) { scanning = true; lastShown = ''; reads = []; $('pauseBtn').textContent = '일시정지'; $('camMsg').textContent = '번호판을 화면 가운데쯤 비춰주세요'; runAll(); }
+});
+
+// 카메라 화면에서 네모 칸 위치 계산
+function guideRegion(){
+  const v = $('video'), box = $('cam').getBoundingClientRect(), gb = $('guide').getBoundingClientRect();
+  const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return null;
+  const s = Math.max(box.width / vw, box.height / vh), ox = (box.width - vw * s) / 2, oy = (box.height - vh * s) / 2;   // object-fit: cover 보정
+  return {src: v, sx: (gb.left - box.left - ox) / s, sy: (gb.top - box.top - oy) / s, sw: gb.width / s, sh: gb.height / s};
+}
+
+/* ---- 인식 (v6): 넓은 영역에서 번호판 글자줄 찾기 ----
+   1) 표시된 넓은 영역(가로 94% × 세로 56%)을 가로 800px 회색조로, 대비를 늘림
+   2) 검은 글자/흰 글자 × 전체 기준/주변 밝기 기준 4가지로 흑백을 만들고,
+      왼쪽부터 이웃한 글자(높이 비슷·세로 위치 가까움·간격 2글자 이내)를 사슬로 이어 글자줄 후보를 모음 (기울어진 번호판도 이어짐)
+   3) 크고 가운데에 가까운 줄부터 최대 3줄: 기울기를 바로 세우고 글자 높이 44px로 맞춰 읽음
+   4) 숫자가 6~8자리이고 0으로 시작하지 않을 때만 번호판으로 인정 (전화번호·스티커·기둥 번호 제외) */
+function plateRows(L, R){
+  const W = 800, H = Math.max(60, Math.round(W * R.sh / R.sw)), {c, x} = L.g;
+  c.width = W; c.height = H;
+  x.drawImage(R.src, R.sx, R.sy, R.sw, R.sh, 0, 0, W, H);
+  const d = x.getImageData(0, 0, W, H).data, n = W * H, g = new Float32Array(n), hist = new Uint32Array(256);
+  for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; g[i] = y; hist[y]++; }
+  let acc = 0, lo = 0, hi = 255;
+  for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= n * 0.02) { lo = i; break; } }
+  acc = 0; for (let i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= n * 0.02) { hi = i; break; } }
+  const k = 255 / Math.max(1, hi - lo); hist.fill(0);
+  for (let i = 0; i < n; i++) { let v = (g[i] - lo) * k; v = v < 0 ? 0 : v > 255 ? 255 : v; g[i] = v; hist[v | 0]++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) ** 2; if (b > best) { best = b; th = i; } }
+  const r = 21, I = new Float64Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) { let row = 0; for (let xx = 0; xx < W; xx++) { row += g[y * W + xx]; I[(y + 1) * (W + 1) + xx + 1] = I[y * (W + 1) + xx + 1] + row; } }
+  const loc = new Float32Array(n);
+  for (let y = 0; y < H; y++) { const y0 = Math.max(0, y - r), y1 = Math.min(H, y + r + 1);
+    for (let xx = 0; xx < W; xx++) { const x0 = Math.max(0, xx - r), x1 = Math.min(W, xx + r + 1);
+      loc[y * W + xx] = (I[y1 * (W + 1) + x1] - I[y0 * (W + 1) + x1] - I[y1 * (W + 1) + x0] + I[y0 * (W + 1) + x0]) / ((y1 - y0) * (x1 - x0)); } }
+  const rows = [];
+  for (let mode = 0; mode < 4; mode++) {
+    const on = new Uint8Array(n);
+    if (mode === 0) for (let i = 0; i < n; i++) on[i] = g[i] <= th ? 1 : 0;
+    else if (mode === 1) for (let i = 0; i < n; i++) on[i] = g[i] > th ? 1 : 0;
+    else if (mode === 2) for (let i = 0; i < n; i++) on[i] = g[i] < loc[i] - 12 ? 1 : 0;
+    else for (let i = 0; i < n; i++) on[i] = g[i] > loc[i] + 12 ? 1 : 0;
+    const {chains, lab} = charChains(on, W, H, 12 * W / 1000, H * 0.8);
+    for (const ch of chains) rows.push({grp: ch, lab, score: scoreRow(ch, W, H)});
+  }
+  rows.sort((a, b) => b.score - a.score);
+  return {rows, W, H};
+}
+function charChains(on, W, H, minh, maxh){
+  const lab = new Int32Array(W * H), stack = [], comps = [];
+  let id = 0;
+  for (let p = 0; p < W * H; p++) {
+    if (!on[p] || lab[p]) continue;
+    id++; let x0 = W, x1 = 0, y0 = H, y1 = 0, cnt = 0, edge = false; stack.push(p); lab[p] = id;
+    while (stack.length) {
+      const q = stack.pop(), qx = q % W, qy = (q / W) | 0; cnt++;
+      if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+      if (qx === 0 || qy === 0 || qx === W - 1 || qy === H - 1) edge = true;
+      if (qx > 0 && on[q-1] && !lab[q-1]) { lab[q-1] = id; stack.push(q-1); }
+      if (qx < W-1 && on[q+1] && !lab[q+1]) { lab[q+1] = id; stack.push(q+1); }
+      if (qy > 0 && on[q-W] && !lab[q-W]) { lab[q-W] = id; stack.push(q-W); }
+      if (qy < H-1 && on[q+W] && !lab[q+W]) { lab[q+W] = id; stack.push(q+W); }
+    }
+    const h = y1 - y0 + 1, w = x1 - x0 + 1, fill = cnt / (h * w);
+    if (edge || h < minh || h > maxh || w > h * 1.6 || w < 2 || fill < 0.12 || fill > 0.92) continue;
+    comps.push({i: id, x0, x1: x1 + 1, y0, y1: y1 + 1, h, cy: (y0 + y1 + 1) / 2, cx: (x0 + x1 + 1) / 2});
+  }
+  comps.sort((a, b) => a.x0 - b.x0);
+  const chains = [];
+  for (const c of comps) {
+    let bestC = null;
+    for (const ch of chains) {
+      const l = ch[ch.length - 1], hm = (l.h + c.h) / 2, gap = c.x0 - l.x1;
+      if (Math.abs(l.h - c.h) <= Math.max(l.h, c.h) * 0.3 && Math.abs(l.cy - c.cy) <= hm * 0.4 && gap >= -hm * 0.3 && gap <= hm * 2.0)
+        if (!bestC || ch.length > bestC.length) bestC = ch;
+    }
+    if (bestC) bestC.push(c); else chains.push([c]);
+  }
+  return {chains: chains.filter(ch => ch.length >= 4), lab};
+}
+function median(a){ const s = [...a].sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+function scoreRow(row, W, H){   // 크고(가까이) 가운데에 있고 글자 수가 번호판다운 줄을 먼저
+  const hm = median(row.map(c => c.h)), cx = row.reduce((a, c) => a + c.cx, 0) / row.length / W, cy = row.reduce((a, c) => a + c.cy, 0) / row.length / H;
+  return hm / H * 40 - (Math.abs(cx - 0.5) + Math.abs(cy - 0.5)) * 8 + (row.length >= 6 && row.length <= 10 ? 4 : 0);
+}
+function renderRow2(L, row, W, target, pad){
+  const {grp, lab} = row, ids = new Set(grp.map(c => c.i)), m = 6;
+  // 기울기: 글자 중심의 직선 맞춤
+  const xs = grp.map(c => c.cx), ys = grp.map(c => c.cy), mx = xs.reduce((a, b) => a + b, 0) / xs.length, my = ys.reduce((a, b) => a + b, 0) / ys.length;
+  let sxy = 0, sxx = 0; for (let i = 0; i < xs.length; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) ** 2; }
+  const ang = sxx > 0 ? Math.atan(sxy / sxx) : 0;
+  const H = lab.length / W;
+  const X0 = Math.max(0, Math.min(...grp.map(c => c.x0)) - m), X1 = Math.min(W, Math.max(...grp.map(c => c.x1)) + m);
+  const Y0 = Math.max(0, Math.min(...grp.map(c => c.y0)) - m), Y1 = Math.min(H, Math.max(...grp.map(c => c.y1)) + m);
+  const cw = X1 - X0, ch = Y1 - Y0, {c: t, x: tx} = L.t; t.width = cw; t.height = ch;
+  const im = tx.createImageData(cw, ch), dd = im.data;
+  for (let y = 0; y < ch; y++) for (let xx = 0; xx < cw; xx++) {
+    const o = (y * cw + xx) * 4, v = ids.has(lab[(y + Y0) * W + xx + X0]) ? 0 : 255; dd[o] = dd[o+1] = dd[o+2] = v; dd[o+3] = 255; }
+  tx.putImageData(im, 0, 0);
+  const rot = Math.abs(ang) > Math.PI / 180 ? ang : 0, cs = Math.abs(Math.cos(rot)), sn = Math.abs(Math.sin(rot));
+  const k = target / Math.max(1, median(grp.map(c => c.h)) * Math.cos(ang));
+  const rw = (cw * cs + ch * sn) * k, rh = (cw * sn + ch * cs) * k, {c, x} = L.r;
+  c.width = Math.round(rw) + 2 * pad; c.height = Math.round(rh) + 2 * pad;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height); x.imageSmoothingEnabled = true;
+  x.translate(c.width / 2, c.height / 2); x.rotate(-rot); x.scale(k, k); x.drawImage(t, -cw / 2, -ch / 2); x.setTransform(1, 0, 0, 1, 0, 0);
+  const o = x.getImageData(0, 0, c.width, c.height), od = o.data;
+  for (let i = 0; i < od.length; i += 4) { const v = od[i] < 128 ? 0 : 255; od[i] = od[i+1] = od[i+2] = v; od[i+3] = 255; }
+  x.putImageData(o, 0, 0);
+  return c;
+}
+function plateLike(r){   // 번호판다운 숫자만: 전체 6~8자리, 0으로 시작하지 않음
+  if (!r) return null; const all = r.lead + r.t4;
+  return all.length >= 6 && all.length <= 8 && all[0] !== '0' ? r : null;
+}
+
+// 예비: 이전 방식 (네모 칸 전체를 흑백으로)
+function grabPlate(L, R){
+  const H = 110, W = Math.round(H * R.sw / R.sh), {c, x} = L.a;
+  c.width = W; c.height = H;
+  x.drawImage(R.src, R.sx, R.sy, R.sw, R.sh, 0, 0, W, H);
+  const img = x.getImageData(0, 0, W, H), d = img.data, n = W * H, gray = new Uint8Array(n), hist = new Array(256).fill(0);
+  for (let i = 0; i < n; i++) { const y = (d[i*4]*299 + d[i*4+1]*587 + d[i*4+2]*114) / 1000 | 0; gray[i] = y; hist[y]++; }
+  let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sB = 0, wB = 0, best = 0, th = 128;
+  for (let i = 0; i < 256; i++) { wB += hist[i]; if (!wB) continue; const wF = n - wB; if (!wF) break; sB += i * hist[i];
+    const mB = sB / wB, mF = (sum - sB) / wF, b = wB * wF * (mB - mF) ** 2; if (b > best) { best = b; th = i; } }
+  let dark = 0; for (let i = 0; i < n; i++) if (gray[i] <= th) dark++;
+  const inv = dark > n * 0.55;   // 글자가 밝은 번호판(녹색 등)이면 뒤집기
+  const on = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { let o = gray[i] <= th; if (inv) o = !o; on[i] = o ? 1 : 0; const cc = o ? 0 : 255; d[i*4] = d[i*4+1] = d[i*4+2] = cc; d[i*4+3] = 255; }
+  x.putImageData(img, 0, 0);
+  return {c, on, W, H};
+}
+
+// 2차: 번호판 테두리·가장자리·잡티를 지운 이미지 (1차에서 못 읽었을 때만)
+function cleanPlate(L, f){
+  const {on, W, H} = f, lab = new Int32Array(W * H), keep = [0], stack = [];
+  let id = 0;
+  for (let p = 0; p < W * H; p++) {
+    if (!on[p] || lab[p]) continue;
+    id++; let x0 = W, x1 = 0, y0 = H, y1 = 0, edge = false; stack.push(p); lab[p] = id;
+    while (stack.length) {
+      const q = stack.pop(), qx = q % W, qy = (q / W) | 0;
+      if (qx < x0) x0 = qx; if (qx > x1) x1 = qx; if (qy < y0) y0 = qy; if (qy > y1) y1 = qy;
+      if (qx === 0 || qy === 0 || qx === W - 1 || qy === H - 1) edge = true;
+      if (qx > 0 && on[q-1] && !lab[q-1]) { lab[q-1] = id; stack.push(q-1); }
+      if (qx < W-1 && on[q+1] && !lab[q+1]) { lab[q+1] = id; stack.push(q+1); }
+      if (qy > 0 && on[q-W] && !lab[q-W]) { lab[q-W] = id; stack.push(q-W); }
+      if (qy < H-1 && on[q+W] && !lab[q+W]) { lab[q+W] = id; stack.push(q+W); }
+    }
+    const h = y1 - y0 + 1, w = x1 - x0 + 1;
+    keep[id] = !(edge || h < H * 0.25 || h > H * 0.9 || w > W * 0.3);
+  }
+  const P = 10, {c, x} = L.b; c.width = W + 2 * P; c.height = H + 2 * P;
+  const img = x.createImageData(c.width, c.height), d = img.data; d.fill(255);
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) {
+    const p = y * W + xx; if (lab[p] && keep[lab[p]]) { const o = ((y + P) * c.width + xx + P) * 4; d[o] = d[o+1] = d[o+2] = 0; }
+  }
+  x.putImageData(img, 0, 0);
+  return c;
+}
+
+function parseRead(text){
+  const groups = (text.match(/\d+/g) || []);
+  const all = groups.join('');
+  if (all.length < 4 || all.length > 9) return null;
+  const last = groups[groups.length - 1];   // 마지막 덩어리가 4자리면 그것, 아니면 전체 숫자의 끝 4자리
+  const t4 = last.length >= 4 ? last.slice(-4) : all.slice(-4);
+  return {t4, lead: all.slice(0, Math.max(0, all.length - 4))};
+}
+
+function showRead(t4, lead){
+  lastShown = t4; $('q').value = t4;
+  const st = render(t4, lead);
+  $('guide').classList.add('hit'); setTimeout(() => $('guide').classList.remove('hit'), 600);
+  try { if (navigator.vibrate) navigator.vibrate(st === 'ok' ? 60 : [80, 60, 80]); } catch(e) {}
+  $('camMsg').textContent = '조회됨 · 다른 차량을 비추면 다시 조회합니다';
+}
+// 오른쪽 아래 숫자를 누르면 바로 조회
+$('camRead').addEventListener('click', () => { const t = $('camRead').textContent; if (/^\d{4}$/.test(t)) showRead(t, ''); });
+
+function handleRead(r){
+  reads.push(r ? r.t4 : null); if (reads.length > 8) reads.shift();
+  if (!r) return;
+  $('camRead').textContent = r.t4; $('camRead').setAttribute('aria-label', r.t4 + '로 조회');
+  // 뒤 4자리 + 앞자리 숫자까지 명단의 차와 맞으면 한 번에 조회 (틀린 차를 띄울 위험이 매우 낮음)
+  // 그 밖에는 같은 숫자가 두 번 읽혀야 조회 (한 번 잘못 읽은 숫자로 다른 차가 뜨는 것을 막음)
+  const sure = !!r.lead && PLATES.some(x => x.t4 === r.t4 && x.front && r.lead.includes(x.front));
+  const cnt = reads.filter(x => x === r.t4).length;
+  if (r.t4 !== lastShown && (sure || cnt >= 2)) showRead(r.t4, r.lead);
+}
+
+// 한 장면 읽기: 후보 줄을 최대 3개까지 읽어 번호판다운 첫 결과를 씀
+async function readRegion(L, R){
+  const {rows, W} = plateRows(L, R);
+  for (const row of rows.slice(0, 3)) {
+    const r = plateLike(parseRead((await L.w.recognize(renderRow2(L, row, W, 44, 14))).data.text || ''));
+    if (r) return r;
+    if (!scanning && !R.test) return null;
+  }
+  return null;
+}
+window.__ocrTest = async (img, w, frac) => {   // 시험용: 이미지 한 장을 같은 방식으로 읽음 (frac = 읽을 영역 비율)
+  const L = {w, g: newCanvas(), t: newCanvas(), r: newCanvas()};
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height, f = frac || [0, 0, 1, 1];
+  return readRegion(L, {src: img, sx: iw * f[0], sy: ih * f[1], sw: iw * f[2], sh: ih * f[3], test: true});
+};
+
+async function loop(L){
+  if (!scanning || L.busy) return;
+  L.busy = true;
+  try {
+    const R = guideRegion();
+    if (R) handleRead(await readRegion(L, R));
+  } catch(e) { console.warn(e); }
+  L.busy = false;
+  if (scanning) setTimeout(() => loop(L), 30);
+}
+
+/* ---------- 식단 ---------- */
+const MEAL_END = {아침:'08:30', 점심:'14:00', 저녁:'18:30', 야식:'24:30'};
+const ymd = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+let MENU = null, menuSel = 0;
+const MEAL_KEY = {조식:'아침', 중식:'점심', 석식:'저녁', 야식:'야식'};
+function mealHours(k){ const h = (MENU && MENU.hours) || ''; for (const [a, b] of Object.entries(MEAL_KEY)) { if (b !== k) continue; const m = new RegExp(a + '\\s*:?\\s*([0-9:]+\\s*~\\s*[0-9:]+)').exec(h); if (m) return m[1].replace(/\s/g, ''); } return ''; }
+async function loadMenu(){
+  try { const r = await fetch('menu.json?t=' + Date.now(), {cache:'no-store'}); if (!r.ok) return; MENU = await r.json(); } catch(e) { return; }
+  if (!MENU.days || !MENU.days.length) return;
+  const today = ymd(new Date());
+  let i = MENU.days.findIndex(d => d.date === today);
+  const old = i < 0 && today > MENU.days[MENU.days.length - 1].date;
+  if (i < 0) i = old ? MENU.days.length - 1 : 0;
+  menuSel = i;
+  $('menuWeek').textContent = MENU.week;
+  $('menuOld').textContent = '이번 주 식단표가 아직 오지 않아 지난 식단표를 보여드립니다.'; $('menuOld').hidden = !old;
+  $('menuHours').textContent = MENU.hours && !mealHours('점심') ? '운영시간 · ' + MENU.hours : '';
+  $('menuImg').src = 'menu.png?v=' + encodeURIComponent(MENU.updated || ''); $('menuImgLink').href = $('menuImg').src;
+  $('menuTabs').innerHTML = MENU.days.map((d, k) => `<button class="tab" role="tab" type="button" data-k="${k}" aria-selected="${k === i}">${esc(d.dow)}<small>${d.date === today ? '오늘' : esc(d.date.slice(8))}</small></button>`).join('');
+  $('menuBox').hidden = false;
+  drawMenu();
+}
+$('menuTabs').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (!b) return; menuSel = +b.dataset.k;
+  [...$('menuTabs').children].forEach(t => t.setAttribute('aria-selected', t === b)); drawMenu(); });
+function drawMenu(){
+  const d = MENU.days[menuSel], isToday = d.date === ymd(new Date());
+  const now = new Date(), hm = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
+  const order = ['아침','점심','저녁','야식'].filter(k => d.meals[k]);
+  const cur = isToday ? (order.find(k => hm <= MEAL_END[k] && !(d.meals[k].closed)) || null) : null;
+  $('menuTitle').textContent = isToday ? '오늘의 식단' : `${d.dow}요일 식단`;
+  const one = (k, big) => { const m = d.meals[k], main = m.closed ? '미운영' : (m.main.join(' / ') || '-');
+    return big ? `<div class="meal-now"><h3>지금 · ${k}${mealHours(k) ? ' ' + mealHours(k) : ''}</h3><div class="main">${esc(main)}</div>${m.closed ? '' : `<div class="sides">${m.sides.map(esc).join(' · ')}</div>`}</div>`
+               : `<div class="meal${m.closed ? ' closed' : ''}"><h3>${k}${mealHours(k) ? ` <span style="font-weight:400">${mealHours(k)}</span>` : ''}</h3><div class="main">${esc(main)}</div>${m.closed ? '' : `<div class="sides">${m.sides.map(esc).join(' · ')}</div>`}</div>`; };
+  $('menuDay').innerHTML = (cur ? one(cur, true) : '') + `<div class="meal-others" style="margin-top:${cur ? 8 : 0}px">${order.filter(k => k !== cur).map(k => one(k, false)).join('')}</div>`;
+}
+loadMenu();
+
+boot();
+</script>
+</body>
+</html>

@@ -543,20 +543,35 @@ let stream = null, scanning = false, lastShown = '', reads = [];
 const lanes = [];   // 휴대폰 코어 수에 따라 1~2개를 동시에 돌림
 function newCanvas(){ const c = document.createElement('canvas'); return {c, x: c.getContext('2d', {willReadFrequently:true})}; }
 
+// 일정 시간 안에 끝나지 않으면 실패로 처리 (휴대폰이 카메라 요청에 응답하지 않고 멈추는 경우 대비)
+const withTimeout = (pr, ms) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), {name: 'TimeoutError'})), ms))]);
+let camToken = 0;   // 켜는 도중 다시 누르면 앞의 시도는 버림
 async function startCam(){
-  $('camErr').hidden = true; $('camStart').disabled = true; $('camLbl').textContent = '켜는 중';
+  const my = ++camToken;
+  $('camErr').hidden = true; $('camLbl').textContent = '켜는 중';
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  let st;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false});
+    st = await withTimeout(navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false}), 8000);
   } catch(e) {
+    if (my !== camToken) return;
     $('camErr').textContent = e && e.name === 'NotAllowedError'
       ? '카메라 권한이 거부되었습니다. 브라우저 설정에서 이 사이트의 카메라를 허용한 뒤 다시 누르세요.'
-      : '카메라를 켤 수 없습니다. 사파리나 크롬에서 열었는지 확인하세요. 번호는 직접 입력해도 됩니다.';
-    $('camErr').hidden = false; $('camStart').disabled = false; $('camLbl').textContent = '카메라'; return;
+      : e && e.name === 'TimeoutError'
+      ? '카메라가 응답하지 않아요. 카메라 버튼을 다시 눌러주세요. (계속 안 되면 페이지를 새로고침하세요)'
+      : '카메라를 켤 수 없습니다. 다른 앱이 카메라를 쓰고 있으면 닫고 다시 누르세요. 번호는 직접 입력해도 됩니다.';
+    $('camErr').hidden = false; $('camStart').setAttribute('aria-pressed', 'false'); $('camLbl').textContent = '카메라'; return;
   }
-  const v = $('video'); v.srcObject = stream; await v.play().catch(()=>{});
+  if (my !== camToken) { st.getTracks().forEach(t => t.stop()); return; }
+  stream = st;
+  // 카메라가 중간에 꺼지면(다른 앱으로 전환 등) 화면을 정리
+  st.getVideoTracks().forEach(t => t.addEventListener('ended', () => { if (stream === st) { camEnded(); } }));
+  const v = $('video'); v.srcObject = stream;
+  try { await withTimeout(v.play(), 4000); } catch(e) { /* 소리 없는 영상이라 대부분 그대로 재생됨 */ }
+  if (my !== camToken) return;
   store.set('ifc-cam', '1');
   $('dock').hidden = true; document.body.classList.remove('has-dock');
-  $('cam').hidden = false; $('camStart').disabled = false; $('camStart').setAttribute('aria-pressed', 'true'); $('camLbl').textContent = '끄기';
+  $('cam').hidden = false; $('camStart').setAttribute('aria-pressed', 'true'); $('camLbl').textContent = '끄기';
   if (!lanes.length) {
     $('camMsg').textContent = '인식 준비 중… (처음 한 번은 조금 걸립니다)';
     const want = (navigator.hardwareConcurrency || 2) >= 4 ? 2 : 1;
@@ -573,7 +588,15 @@ async function startCam(){
   $('pauseBtn').textContent = '일시정지';
   scanning = true; runAll();
 }
+function camEnded(){   // 휴대폰이 카메라를 꺼버린 경우: 화면이 다시 보이면 자동으로 다시 켬
+  scanning = false;
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $('video').srcObject = null;
+  if (!document.hidden) startCam(); else camResume = true;
+}
+let camResume = false;
 function stopCam(){
+  camToken++;
   scanning = false;
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
   $('video').srcObject = null; $('cam').hidden = true;
@@ -582,13 +605,22 @@ function stopCam(){
   render($('q').value);
 }
 function runAll(){ lanes.forEach((L, i) => setTimeout(() => loop(L), i * 150)); }
-$('camStart').onclick = () => stream ? stopCam() : startCam();
+$('camStart').onclick = () => ($('camLbl').textContent === '끄기' && stream) ? stopCam() : startCam();
 $('pauseBtn').onclick = () => {
   scanning = !scanning; $('pauseBtn').textContent = scanning ? '일시정지' : '다시 시작';
   $('camMsg').textContent = scanning ? '번호판을 화면 가운데쯤 비춰주세요' : '일시정지됨';
   if (scanning) { lastShown = ''; reads = []; runAll(); }
 };
-document.addEventListener('visibilitychange', () => { if (document.hidden && stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; }
+    return;
+  }
+  // 다시 화면으로 돌아왔을 때: 카메라가 꺼져 있으면 다시 켜고, 살아 있으면 인식 재개
+  const live = stream && stream.getVideoTracks().some(t => t.readyState === 'live' && !t.muted);
+  if (camResume || (stream && !live)) { camResume = false; startCam(); }
+  else if (stream && !scanning && lanes.length) { scanning = true; lastShown = ''; reads = []; $('pauseBtn').textContent = '일시정지'; $('camMsg').textContent = '번호판을 화면 가운데쯤 비춰주세요'; runAll(); }
+});
 
 // 카메라 화면에서 네모 칸 위치 계산
 function guideRegion(){
