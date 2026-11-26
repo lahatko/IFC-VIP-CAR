@@ -546,24 +546,49 @@ function newCanvas(){ const c = document.createElement('canvas'); return {c, x: 
 // 일정 시간 안에 끝나지 않으면 실패로 처리 (휴대폰이 카메라 요청에 응답하지 않고 멈추는 경우 대비)
 const withTimeout = (pr, ms) => Promise.race([pr, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error('timeout'), {name: 'TimeoutError'})), ms))]);
 let camToken = 0;   // 켜는 도중 다시 누르면 앞의 시도는 버림
+// 탭이 여러 개 열려 있어도 카메라는 한 탭만 쓰게: 카메라를 켜는 탭이 다른 탭에 '놓아 달라'고 알림
+const TAB_ID = Math.random().toString(36).slice(2);
+let camBus = null; try { camBus = new BroadcastChannel('ifc-cam'); } catch(e) {}
+function camBusSend(type){ try { camBus && camBus.postMessage({type, from: TAB_ID}); } catch(e) {} }
+if (camBus) camBus.onmessage = e => {
+  const m = e.data || {}; if (m.from === TAB_ID) return;
+  if ((m.type === 'claim' || m.type === 'release') && (stream || $('camLbl').textContent === '켜는 중')) {
+    camToken++; scanning = false; camResume = false;
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    $('video').srcObject = null; $('cam').hidden = true;
+    $('camStart').setAttribute('aria-pressed', 'false'); $('camLbl').textContent = '카메라';
+    $('camErr').textContent = '다른 탭에서 카메라를 쓰고 있어서 이 탭의 카메라를 껐어요. 이 탭에서 쓰려면 카메라 버튼을 누르세요.'; $('camErr').hidden = false;
+  }
+};
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function startCam(){
   const my = ++camToken;
   $('camErr').hidden = true; $('camLbl').textContent = '켜는 중';
   if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  camBusSend('release');   // 다른 탭이 카메라를 쥐고 있으면 놓게 함
+  const ask = () => withTimeout(navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false}), 8000);
   let st;
   try {
-    st = await withTimeout(navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}, audio:false}), 8000);
+    try { st = await ask(); }
+    catch(e1) {   // 카메라가 다른 곳에서 사용 중이면 잠깐 기다렸다가 한 번 더
+      if (my !== camToken || !['NotReadableError', 'TrackStartError', 'AbortError', 'TimeoutError'].includes(e1 && e1.name)) throw e1;
+      camBusSend('release'); await sleep(900);
+      if (my !== camToken) return;
+      st = await ask();
+    }
   } catch(e) {
     if (my !== camToken) return;
     $('camErr').textContent = e && e.name === 'NotAllowedError'
       ? '카메라 권한이 거부되었습니다. 브라우저 설정에서 이 사이트의 카메라를 허용한 뒤 다시 누르세요.'
+      : e && (e.name === 'NotReadableError' || e.name === 'TrackStartError')
+      ? '다른 탭이나 앱이 카메라를 쓰고 있어요. 차량조회 탭이 여러 개 열려 있으면 다른 탭을 닫고 카메라 버튼을 다시 누르세요.'
       : e && e.name === 'TimeoutError'
-      ? '카메라가 응답하지 않아요. 카메라 버튼을 다시 눌러주세요. (계속 안 되면 페이지를 새로고침하세요)'
+      ? '카메라가 응답하지 않아요. 차량조회 탭이 여러 개 열려 있으면 다른 탭을 닫고 카메라 버튼을 다시 누르세요.'
       : '카메라를 켤 수 없습니다. 다른 앱이 카메라를 쓰고 있으면 닫고 다시 누르세요. 번호는 직접 입력해도 됩니다.';
     $('camErr').hidden = false; $('camStart').setAttribute('aria-pressed', 'false'); $('camLbl').textContent = '카메라'; return;
   }
   if (my !== camToken) { st.getTracks().forEach(t => t.stop()); return; }
-  stream = st;
+  stream = st; camBusSend('claim');
   // 카메라가 중간에 꺼지면(다른 앱으로 전환 등) 화면을 정리
   st.getVideoTracks().forEach(t => t.addEventListener('ended', () => { if (stream === st) { camEnded(); } }));
   const v = $('video'); v.srcObject = stream;
@@ -612,8 +637,8 @@ $('pauseBtn').onclick = () => {
   if (scanning) { lastShown = ''; reads = []; runAll(); }
 };
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    if (stream) { scanning = false; $('pauseBtn').textContent = '다시 시작'; $('camMsg').textContent = '일시정지됨'; }
+  if (document.hidden) {   // 다른 탭·앱으로 가면 카메라를 완전히 놓음 (다른 탭에서 쓸 수 있게) → 돌아오면 다시 켬
+    if (stream) { camToken++; scanning = false; stream.getTracks().forEach(t => t.stop()); stream = null; $('video').srcObject = null; camResume = true; $('camLbl').textContent = '카메라'; }
     return;
   }
   // 다시 화면으로 돌아왔을 때: 카메라가 꺼져 있으면 다시 켜고, 살아 있으면 인식 재개
